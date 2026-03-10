@@ -1,0 +1,7 @@
+node_modules/
+user-data/
+settings.json
+.uploads/
+*.log
+*.vbs.tmp
+%TEMP%*

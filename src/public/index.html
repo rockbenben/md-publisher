@@ -1,0 +1,1487 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>md-publisher</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #242837;
+      --border: #2e3347;
+      --text: #e4e6f0;
+      --text2: #8b8fa8;
+      --accent: #6366f1;
+      --accent-hover: #818cf8;
+      --green: #22c55e;
+      --red: #ef4444;
+      --yellow: #eab308;
+      --radius: 8px;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-bottom: 12px;
+      margin-bottom: 0;
+    }
+
+    header h1 {
+      font-size: 20px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .connection-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--red);
+      transition: background 0.3s;
+    }
+
+    .connection-dot.connected { background: var(--green); }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .header-link {
+      color: var(--text2);
+      transition: color 0.2s;
+      display: flex;
+      align-items: center;
+    }
+
+    .header-link:hover { color: var(--text); }
+
+    .settings-btn {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text2);
+      padding: 6px 12px;
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+
+    .settings-btn:hover { border-color: var(--accent); color: var(--text); }
+
+    footer {
+      margin-top: 32px;
+      padding: 16px 0;
+      border-top: 1px solid var(--border);
+      text-align: center;
+      font-size: 12px;
+      color: var(--text2);
+    }
+
+    footer a {
+      color: var(--text2);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+
+    footer a:hover { color: var(--accent-hover); }
+
+    .footer-links {
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    /* Tab navigation */
+    .tab-bar {
+      display: flex;
+      gap: 0;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 20px;
+    }
+
+    .tab-btn {
+      padding: 8px 20px;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text2);
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    .tab-view { display: none; }
+    .tab-view.active { display: block; }
+
+    /* Settings view */
+    .settings-group {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    .settings-group-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text2);
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .settings-group label {
+      display: block;
+      font-size: 13px;
+      color: var(--text2);
+      margin-bottom: 4px;
+    }
+
+    .text-input {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 8px 12px;
+      color: var(--text);
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .text-input:focus { border-color: var(--accent); }
+
+    .settings-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    /* Sections */
+    .section { margin-bottom: 20px; }
+
+    .section-header {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text2);
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* Add file bar */
+    .add-file-bar {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+
+    .add-file-bar .text-input { flex: 1; padding: 7px 12px; font-size: 13px; }
+
+    .add-file-bar button {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 7px 14px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.2s;
+    }
+
+    .add-file-bar button:hover { border-color: var(--accent); }
+
+    /* Article list */
+    .article-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .article-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .article-item:hover { border-color: var(--accent); }
+    .article-item.selected { border-color: var(--accent); background: rgba(99, 102, 241, 0.08); }
+
+    .article-item input[type="checkbox"] {
+      accent-color: var(--accent);
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .article-info { flex: 1; min-width: 0; }
+
+    .article-title {
+      font-size: 14px;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .article-meta {
+      font-size: 12px;
+      color: var(--text2);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .article-badge {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: rgba(99, 102, 241, 0.15);
+      color: var(--accent-hover);
+      flex-shrink: 0;
+    }
+
+    .article-remove {
+      background: none;
+      border: none;
+      color: var(--text2);
+      cursor: pointer;
+      font-size: 16px;
+      padding: 0 4px;
+      line-height: 1;
+      flex-shrink: 0;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+
+    .article-item:hover .article-remove { opacity: 1; }
+    .article-remove:hover { color: var(--red); }
+
+    .empty-state {
+      text-align: center;
+      padding: 32px;
+      color: var(--text2);
+      font-size: 14px;
+      background: var(--surface);
+      border: 1px dashed var(--border);
+      border-radius: var(--radius);
+    }
+
+    /* Platform grid */
+    .platform-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 8px;
+    }
+
+    .platform-chip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: all 0.15s;
+      font-size: 14px;
+      min-width: 0;
+    }
+
+    .platform-chip:hover { border-color: var(--accent); }
+    .platform-chip.selected { border-color: var(--accent); background: rgba(99, 102, 241, 0.08); }
+    .platform-chip input { accent-color: var(--accent); cursor: pointer; }
+
+    .platform-status { margin-left: auto; font-size: 12px; }
+
+    .platform-chip > span:first-of-type {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex-shrink: 1;
+      min-width: 0;
+    }
+
+    .platform-chip .login-info {
+      font-size: 11px;
+      color: var(--text2);
+      margin-left: auto;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 120px;
+      flex-shrink: 0;
+    }
+
+    .platform-chip .login-info.logged-in { color: var(--green); }
+    .platform-chip .login-info.not-logged-in { color: var(--text2); opacity: 0.6; }
+
+    .config-badge {
+      padding: 8px 14px;
+      background: rgba(99, 102, 241, 0.06);
+      border: 1px solid rgba(99, 102, 241, 0.2);
+      border-radius: var(--radius);
+      font-size: 12px;
+      color: var(--text2);
+      line-height: 1.5;
+    }
+    .config-badge strong { color: var(--text); }
+
+    /* Actions bar */
+    .actions-bar {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-top: 4px;
+    }
+
+    .btn-publish {
+      background: var(--accent);
+      color: white;
+      border: none;
+      padding: 10px 24px;
+      border-radius: var(--radius);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-publish:hover { background: var(--accent-hover); }
+    .btn-publish:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .btn-secondary {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 10px 16px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-secondary:hover { border-color: var(--accent); }
+
+    .publish-count { font-size: 13px; color: var(--text2); }
+
+    /* Log panel */
+    .log-panel {
+      background: #0d0f14;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .log-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 14px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text2);
+    }
+
+    .log-clear {
+      font-size: 12px;
+      color: var(--text2);
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+
+    .log-clear:hover { background: var(--surface2); color: var(--text); }
+
+    .log-body {
+      padding: 10px 14px;
+      max-height: 360px;
+      overflow-y: auto;
+      font-family: 'Cascadia Code', 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+      font-size: 12.5px;
+      line-height: 1.7;
+    }
+
+    .log-line { white-space: pre-wrap; word-break: break-all; }
+    .log-line.error { color: var(--red); }
+    .log-line .time { color: var(--text2); margin-right: 6px; }
+    .log-line .success { color: var(--green); }
+    .log-line .warn { color: var(--yellow); }
+
+    /* Progress banner */
+    .progress-banner {
+      display: none;
+      padding: 12px 16px;
+      background: rgba(99, 102, 241, 0.1);
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      border-radius: var(--radius);
+      margin-bottom: 16px;
+      font-size: 14px;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .progress-banner.visible { display: flex; }
+
+    .btn-cancel {
+      margin-left: auto;
+      padding: 4px 12px;
+      font-size: 12px;
+      background: var(--red);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .btn-cancel:hover { opacity: 0.85; }
+    .btn-cancel:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 12px 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 14px;
+      z-index: 1000;
+      transform: translateX(120%);
+      transition: transform 0.3s ease;
+      max-width: 360px;
+    }
+
+    .toast.show { transform: translateX(0); }
+    .toast.success { border-color: var(--green); }
+    .toast.error { border-color: var(--red); }
+
+    /* Selection actions row */
+    .selection-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .selection-actions button {
+      font-size: 12px;
+      color: var(--accent);
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 2px 4px;
+    }
+
+    .selection-actions button:hover { text-decoration: underline; }
+
+    /* Directory browser modal */
+    .dir-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:900; justify-content:center; align-items:center; }
+    .dir-modal.open { display:flex; }
+    .dir-panel { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); width:520px; max-height:65vh; display:flex; flex-direction:column; }
+    .dir-header { display:flex; align-items:center; gap:8px; padding:10px 14px; border-bottom:1px solid var(--border); font-size:13px; }
+    .dir-header .dir-path { flex:1; color:var(--text2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .dir-header button { background:var(--surface2); border:1px solid var(--border); color:var(--text); padding:4px 10px; border-radius:4px; cursor:pointer; font-size:12px; white-space:nowrap; }
+    .dir-header button:hover { border-color:var(--accent); }
+    .dir-list { flex:1; overflow-y:auto; min-height:120px; max-height:45vh; }
+    .dir-item { display:flex; align-items:center; gap:8px; padding:7px 14px; cursor:pointer; font-size:13px; transition:background 0.1s; }
+    .dir-item:hover { background:var(--surface2); }
+    .dir-item .icon { opacity:0.6; }
+    .dir-footer { display:flex; gap:8px; padding:10px 14px; border-top:1px solid var(--border); justify-content:flex-end; }
+    .dir-footer button { padding:6px 16px; border-radius:var(--radius); font-size:13px; cursor:pointer; border:1px solid var(--border); }
+    .dir-footer .dir-select { background:var(--accent); color:white; border-color:var(--accent); }
+    .dir-footer .dir-cancel { background:var(--surface2); color:var(--text); }
+    .dir-empty { padding:24px; text-align:center; color:var(--text2); font-size:13px; }
+    .dir-item.active { background:rgba(99,102,241,0.12); color:var(--accent-hover); }
+
+    /* Responsive */
+    @media (max-width: 640px) {
+      .container { padding: 16px; }
+      .platform-grid { grid-template-columns: 1fr; }
+      .add-file-bar { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>
+        <span>📮</span> md-publisher
+        <span class="connection-dot" id="connectionDot" title="SSE 连接状态"></span>
+      </h1>
+      <div class="header-actions">
+        <a class="header-link" href="https://github.com/rockbenben/md-publisher" target="_blank" rel="noopener" title="GitHub">
+          <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        </a>
+        <button class="settings-btn" onclick="shutdownApp()" style="color:var(--red)">⏻ 退出</button>
+      </div>
+    </header>
+
+    <!-- Tab Bar -->
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="publish" onclick="switchTab('publish')">发布</button>
+      <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')">设置</button>
+    </div>
+
+    <!-- Publish View -->
+    <div class="tab-view active" id="publishView">
+
+    <!-- Progress Banner -->
+    <div class="progress-banner" id="progressBanner">
+      <div class="spinner"></div>
+      <span id="progressText">正在发布...</span>
+      <button class="btn-cancel" id="cancelBtn" onclick="cancelPublish()">取消</button>
+    </div>
+
+    <!-- Articles Section -->
+    <div class="section">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div class="section-header" style="margin-bottom:0">文章</div>
+        <div class="selection-actions">
+          <button onclick="selectAllArticles()">全选</button>
+          <button onclick="deselectAllArticles()">取消全选</button>
+          <button onclick="clearAllArticles()">清空</button>
+          <button class="btn-secondary" style="padding:4px 10px;font-size:12px" onclick="refreshArticles()">🔄 刷新</button>
+        </div>
+      </div>
+
+      <!-- Manual add file -->
+      <div class="add-file-bar">
+        <button onclick="pickFiles()">📂 选择文件</button>
+        <button onclick="pickFolder()">📁 选择目录</button>
+        <input type="text" class="text-input" id="manualFilePath"
+          placeholder="或输入路径，按回车添加"
+          onkeydown="if(event.key==='Enter')addManualFile()">
+        <button onclick="addManualFile()">+ 添加</button>
+      </div>
+
+      <div id="articleList" class="article-list">
+        <div class="empty-state">请在设置中配置文章目录，或手动添加文件</div>
+      </div>
+    </div>
+
+    <!-- Platforms Section -->
+    <div class="section">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div class="section-header" style="margin-bottom:0">平台</div>
+        <button class="btn-secondary" style="padding:4px 10px;font-size:12px" id="checkLoginBtn" onclick="checkLoginStatus()">🔑 检查登录</button>
+      </div>
+      <div id="platformGrid" class="platform-grid"></div>
+    </div>
+
+    <!-- Project config badge -->
+    <div id="configBadge" class="config-badge" style="display:none"></div>
+
+    <!-- Actions -->
+    <div class="actions-bar">
+      <button class="btn-publish" id="publishBtn" onclick="startPublish()" disabled>发布</button>
+      <button class="btn-secondary" onclick="closeBrowser()" title="关闭 Playwright 控制的自动化 Chrome 窗口，不影响本页面">关闭发布窗口</button>
+      <span class="publish-count" id="publishCount"></span>
+    </div>
+
+    <!-- Log Panel -->
+    <div class="section" style="margin-top:20px">
+      <div class="log-panel">
+        <div class="log-header">
+          <span>日志</span>
+          <button class="log-clear" onclick="clearLog()">清除</button>
+        </div>
+        <div class="log-body" id="logBody"></div>
+      </div>
+    </div>
+
+    </div><!-- /publishView -->
+
+    <!-- Settings View -->
+    <div class="tab-view" id="settingsView">
+      <div class="settings-group">
+        <div class="settings-group-title">默认文章目录</div>
+        <p style="font-size:13px;color:var(--text2);margin-bottom:10px">启动时自动加载该目录下的文章文件（.md .markdown .txt 等）</p>
+        <div class="add-file-bar" style="margin-bottom:0">
+          <input type="text" class="text-input" id="articleDir" placeholder="例如: D:\blog\articles">
+          <button onclick="pickSettingsDir()">📁 浏览</button>
+          <button onclick="clearArticleDir()">✕ 清除</button>
+        </div>
+        <div class="settings-actions">
+          <button class="btn-publish" onclick="saveSettings()">保存</button>
+        </div>
+      </div>
+
+    </div>
+
+    <footer>
+      <div class="footer-links">
+        <a href="https://github.com/rockbenben/md-publisher" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://www.aishort.top/" target="_blank" rel="noopener">AiShort</a>
+        <a href="https://tools.newzone.top/zh" target="_blank" rel="noopener">Tools</a>
+        <a href="https://prompt.newzone.top/app/zh" target="_blank" rel="noopener">IMGPrompt</a>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- Directory browser modal -->
+  <div class="dir-modal" id="dirModal">
+    <div class="dir-panel">
+      <div class="dir-header">
+        <button onclick="dirBrowserUp()">⬆</button>
+        <span class="dir-path" id="dirPath">选择目录</span>
+        <button onclick="dirBrowserRoot()">🖥 根目录</button>
+      </div>
+      <div class="dir-list" id="dirList"></div>
+      <div class="dir-footer">
+        <button class="dir-cancel" onclick="closeDirBrowser()">取消</button>
+        <button class="dir-select" id="dirSelectBtn" onclick="selectDirBrowser()">✓ 选择此目录</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // --- State ---
+    let dirArticles = [];      // from directory scan
+    let manualArticles = [];   // manually added
+    let _allArticlesCache = null; // invalidated when dir/manual changes
+    let platforms = [];
+    let selectedArticles = new Set();  // indices into allArticles()
+    let selectedPlatforms = new Set();
+    let settings = {};
+    let isPublishing = false;
+    let loginStatus = {}; // { platformId: { loggedIn: bool, username: string } }
+
+    function allArticles() {
+      if (!_allArticlesCache) _allArticlesCache = [...dirArticles, ...manualArticles];
+      return _allArticlesCache;
+    }
+    function invalidateArticleCache() { _allArticlesCache = null; }
+
+    // --- Init ---
+    async function init() {
+      try {
+        await loadPlatforms();
+        await loadSettingsFromServer();
+        await refreshArticles();
+      } catch (err) {
+        showToast('初始化失败: ' + err.message, 'error');
+      }
+      connectSSE();
+    }
+
+    // --- API calls ---
+    async function loadPlatforms() {
+      const res = await fetch('/api/platforms');
+      if (!res.ok) throw new Error(`加载平台列表失败: HTTP ${res.status}`);
+      platforms = await res.json();
+      renderPlatforms();
+    }
+
+    async function loadSettingsFromServer() {
+      const res = await fetch('/api/settings');
+      if (!res.ok) throw new Error(`加载设置失败: HTTP ${res.status}`);
+      settings = await res.json();
+      document.getElementById('articleDir').value = settings.articleDir || '';
+      if (settings.defaultPlatforms) {
+        selectedPlatforms = new Set(settings.defaultPlatforms);
+      }
+      // Restore saved login status as default values
+      if (settings.loginStatus) {
+        loginStatus = { ...settings.loginStatus };
+      }
+      renderPlatforms();
+    }
+
+    async function saveSettings() {
+      const articleDir = document.getElementById('articleDir').value.trim();
+      settings = { ...settings, articleDir };
+      projectConfig = null; // Clear old config — refreshArticles will reload from new dir
+      renderConfigBadge();
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(settings),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        showToast('设置已保存', 'success');
+        switchTab('publish');
+        await refreshArticles();
+      } catch (err) {
+        showToast('设置保存失败: ' + (err.message || err), 'error');
+      }
+    }
+
+    async function clearArticleDir() {
+      document.getElementById('articleDir').value = '';
+      const prevSettings = { ...settings };
+      settings = { ...settings, articleDir: '' };
+      projectConfig = null;
+      renderConfigBadge();
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(settings),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        dirArticles = [];
+        invalidateArticleCache();
+        selectedArticles.clear();
+        renderArticles();
+        updatePublishBtn();
+        showToast('已清除默认文章目录', 'success');
+      } catch (err) {
+        settings = prevSettings; // Rollback local state
+        document.getElementById('articleDir').value = prevSettings.articleDir || '';
+        showToast('清除失败: ' + (err.message || err), 'error');
+      }
+    }
+
+    let projectConfig = null; // from .md-publisher.yml in article directory
+
+    async function refreshArticles() {
+      if (isPublishing) return;
+      // Preserve manually added articles across refresh — only re-scan default dir
+      const dir = settings.articleDir;
+      projectConfig = null;
+      if (!dir) {
+        dirArticles = [];
+      } else {
+        try {
+          const res = await fetch(`/api/articles?dir=${encodeURIComponent(dir)}`);
+          const data = await res.json();
+          if (data.error) {
+            showToast(data.error, 'error');
+            dirArticles = [];
+          } else {
+            dirArticles = data.articles;
+            // Apply project config (.md-publisher.yml) if present
+            if (data.projectConfig) {
+              projectConfig = data.projectConfig;
+              applyProjectConfig(projectConfig);
+            }
+          }
+        } catch {
+          showToast('加载文章失败', 'error');
+          dirArticles = [];
+        }
+      }
+      // Remove manual articles that now overlap with dir articles (by filePath)
+      if (manualArticles.length && dirArticles.length) {
+        const dirPaths = new Set(dirArticles.map(a => a.filePath));
+        manualArticles = manualArticles.filter(a => !dirPaths.has(a.filePath));
+      }
+      invalidateArticleCache();
+      // Re-select all articles (indices may have changed due to dedup)
+      selectedArticles.clear();
+      allArticles().forEach((_, i) => selectedArticles.add(i));
+      renderArticles();
+      const count = allArticles().length;
+      if (dir && count > 0) {
+        const msg = projectConfig
+          ? `已从默认目录加载 ${count} 篇文章（已应用项目配置）`
+          : `已从默认目录加载 ${count} 篇文章`;
+        showToast(msg, 'success');
+      }
+      updatePublishBtn();
+    }
+
+    function applyProjectConfig(config) {
+      if (config.platforms) {
+        selectedPlatforms = new Set(config.platforms);
+        renderPlatforms();
+      }
+      renderConfigBadge();
+    }
+
+    function renderConfigBadge() {
+      const el = document.getElementById('configBadge');
+      if (!projectConfig) { el.style.display = 'none'; return; }
+      const parts = ['<strong>📋 .md-publisher.yml</strong>'];
+      if (projectConfig.platforms) parts.push('平台: ' + esc(projectConfig.platforms.map(id => {
+        const p = platforms.find(x => x.id === id);
+        return p ? p.name : id;
+      }).join(', ')));
+      if (projectConfig.category) parts.push('分类: ' + esc(projectConfig.category.join(', ')));
+      if (projectConfig.tag) parts.push('标签: ' + esc(projectConfig.tag.join(', ')));
+      el.innerHTML = parts.join(' &nbsp;·&nbsp; ');
+      el.style.display = '';
+    }
+
+    // --- File picker (File System Access API with <input> fallback) ---
+    const ARTICLE_EXTS = ['.md', '.markdown', '.mdown', '.mkd', '.mkdn', '.mdwn', '.mdx', '.txt'];
+    const SKIP_FILES = new Set(['readme.md', 'changelog.md', 'license.md', 'license.txt']);
+
+    async function pickFiles() {
+      // Try native File System Access API first (Chrome/Edge)
+      if (window.showOpenFilePicker) {
+        try {
+          const handles = await window.showOpenFilePicker({
+            multiple: true,
+            types: [{ description: 'Markdown / Text', accept: { 'text/plain': ARTICLE_EXTS } }],
+          });
+          const files = await Promise.all(handles.map(h => h.getFile()));
+          await uploadPickedFiles(files);
+          return;
+        } catch (err) {
+          if (err.name === 'AbortError') return;
+          // Fall through to <input> fallback
+        }
+      }
+      // Fallback: hidden <input type="file">
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.multiple = true;
+      input.accept = ARTICLE_EXTS.join(',');
+      input.style.display = 'none';
+      input.onchange = async () => {
+        if (input.files.length) await uploadPickedFiles(Array.from(input.files));
+        input.remove();
+      };
+      document.body.appendChild(input);
+      input.click();
+      // Clean up if user cancels the dialog (focus returns to window)
+      window.addEventListener('focus', () => { if (input.parentNode) input.remove(); }, { once: true });
+    }
+
+    async function pickFolder() {
+      // Try native File System Access API first (Chrome/Edge)
+      if (window.showDirectoryPicker) {
+        try {
+          const dirHandle = await window.showDirectoryPicker();
+          const files = [];
+          for await (const entry of dirHandle.values()) {
+            if (entry.kind !== 'file' || entry.name.startsWith('.')) continue;
+            const nameLower = entry.name.toLowerCase();
+            if (SKIP_FILES.has(nameLower)) continue;
+            const dot = entry.name.lastIndexOf('.');
+            if (dot >= 0 && ARTICLE_EXTS.includes(nameLower.substring(dot))) {
+              files.push(await entry.getFile());
+            }
+          }
+          if (!files.length) { showToast('该目录下没有找到文章文件', 'error'); return; }
+          await uploadPickedFiles(files);
+          return;
+        } catch (err) {
+          if (err.name === 'AbortError') return;
+          // Fall through to <input> fallback
+        }
+      }
+      // Fallback: hidden <input type="file" webkitdirectory>
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.setAttribute('webkitdirectory', '');
+      input.style.display = 'none';
+      input.onchange = async () => {
+        const all = Array.from(input.files);
+        const filtered = all.filter(f => {
+          if (f.name.startsWith('.')) return false;
+          const nameLower = f.name.toLowerCase();
+          if (SKIP_FILES.has(nameLower)) return false;
+          const dot = f.name.lastIndexOf('.');
+          return dot >= 0 && ARTICLE_EXTS.includes(nameLower.substring(dot));
+        });
+        if (!filtered.length) { showToast('该目录下没有找到文章文件', 'error'); }
+        else { await uploadPickedFiles(filtered); }
+        input.remove();
+      };
+      document.body.appendChild(input);
+      input.click();
+      // Clean up if user cancels the dialog (focus returns to window)
+      window.addEventListener('focus', () => { if (input.parentNode) input.remove(); }, { once: true });
+    }
+
+    async function uploadPickedFiles(fileList) {
+      const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per file
+      const files = [];
+      for (const f of fileList) {
+        if (f.size > MAX_FILE_SIZE) {
+          showToast(`文件 ${f.name} 过大（${(f.size / 1024 / 1024).toFixed(1)}MB），已跳过`, 'error');
+          continue;
+        }
+        files.push({ name: f.name, content: await f.text() });
+      }
+      if (!files.length) return;
+      try {
+        const res = await fetch('/api/articles/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ files }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.articles?.length) {
+          showToast(data.error || '没有找到可解析的文章', 'error');
+          return;
+        }
+        const existing = new Set(allArticles().map(a => a.filePath));
+        const newOnes = data.articles.filter(a => !existing.has(a.filePath));
+        if (!newOnes.length) { showToast('所有文件已存在', ''); return; }
+        const baseIdx = allArticles().length;
+        manualArticles.push(...newOnes);
+        invalidateArticleCache();
+        for (let i = 0; i < newOnes.length; i++) selectedArticles.add(baseIdx + i);
+        renderArticles();
+        updatePublishBtn();
+        showToast(`已添加 ${newOnes.length} 篇文章`, 'success');
+      } catch (err) {
+        showToast('添加失败: ' + err.message, 'error');
+      }
+    }
+
+    async function addFilePath(filePath, autoSelect = false, silent = false) {
+      // Check for duplicates
+      const all = allArticles();
+      if (all.some(a => a.filePath === filePath)) return 0;
+
+      try {
+        const res = await fetch('/api/articles/parse', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filePath }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          showToast(data.error, 'error');
+          return 0;
+        }
+        const existing = new Set(allArticles().map(a => a.filePath));
+        const newArticles = data.articles.filter(a => !existing.has(a.filePath));
+        if (newArticles.length === 0) return 0;
+        const baseIdx = allArticles().length;
+        manualArticles.push(...newArticles);
+        invalidateArticleCache();
+        if (autoSelect) {
+          for (let i = 0; i < newArticles.length; i++) {
+            selectedArticles.add(baseIdx + i);
+          }
+        }
+        renderArticles();
+        updatePublishBtn();
+        if (!silent) showToast(`已添加 ${newArticles.length} 篇文章`, 'success');
+        return newArticles.length;
+      } catch (err) {
+        showToast('添加失败: ' + err.message, 'error');
+        return 0;
+      }
+    }
+
+    async function addManualFile() {
+      const input = document.getElementById('manualFilePath');
+      const filePath = input.value.trim();
+      if (!filePath) return;
+      await addFilePath(filePath, true);
+      input.value = '';
+    }
+
+    function removeManualArticle(filePath) {
+      if (isPublishing) return; // Prevent mutation during publish
+
+      // Adjust selected indices before removing
+      const all = allArticles();
+      const removeIdx = all.findIndex(a => a.filePath === filePath);
+      if (removeIdx === -1) return; // Not found — nothing to remove
+
+      const newSelected = new Set();
+      for (const idx of selectedArticles) {
+        if (idx < removeIdx) newSelected.add(idx);
+        else if (idx > removeIdx) newSelected.add(idx - 1);
+        // skip idx === removeIdx (removing it)
+      }
+      selectedArticles = newSelected;
+
+      manualArticles = manualArticles.filter(a => a.filePath !== filePath);
+      invalidateArticleCache();
+      renderArticles();
+      updatePublishBtn();
+    }
+
+    async function startPublish() {
+      if (isPublishing) return;
+      const all = allArticles();
+      const filePaths = all.filter((_, i) => selectedArticles.has(i)).map(a => a.filePath);
+      const platformIds = [...selectedPlatforms];
+      if (!filePaths.length || !platformIds.length) {
+        showToast('请选择文章和平台', 'error');
+        return;
+      }
+
+      isPublishing = true;
+      updatePublishBtn();
+
+      try {
+        const res = await fetch('/api/publish', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filePaths, platforms: platformIds,
+            category: projectConfig?.category,
+            tag: projectConfig?.tag,
+          }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || `HTTP ${res.status}`);
+        }
+      } catch (err) {
+        showToast('发布请求失败: ' + err.message, 'error');
+        isPublishing = false;
+        updatePublishBtn();
+      }
+    }
+
+    async function cancelPublish() {
+      const btn = document.getElementById('cancelBtn');
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/cancel-publish', { method: 'POST' });
+        if (res.ok) showToast('正在取消发布...', '');
+      } catch {
+        showToast('取消请求失败', 'error');
+      }
+    }
+
+    async function closeBrowser() {
+      try {
+        await fetch('/api/close-browser', { method: 'POST' });
+        showToast('发布窗口已关闭', 'success');
+      } catch {
+        showToast('关闭发布窗口失败', 'error');
+      }
+    }
+
+    async function checkLoginStatus() {
+      if (isPublishing) {
+        showToast('发布中，请等待完成后再检查', 'error');
+        return;
+      }
+      try {
+        const res = await fetch('/api/check-login', { method: 'POST' });
+        if (res.status === 409) {
+          showToast('正在检查中，请稍候', 'error');
+        }
+        // Results arrive via SSE events — no need to wait here
+      } catch (err) {
+        showToast('检查登录状态失败: ' + err.message, 'error');
+      }
+    }
+
+    async function shutdownApp() {
+      if (isPublishing) {
+        showToast('发布中，请等待完成后再退出', 'error');
+        return;
+      }
+      if (!confirm('确认退出 md-publisher？')) return;
+      // Close SSE before shutdown to prevent reconnect attempts
+      if (_currentES) { _currentES.close(); _currentES = null; }
+      try {
+        await fetch('/api/shutdown', { method: 'POST' });
+        document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:var(--text2);font-size:16px">md-publisher 已关闭</div>';
+      } catch {}
+    }
+
+    // --- SSE ---
+    let _sseRetryDelay = 1000;
+    let _loginRenderTimer = null;
+    let _currentES = null;
+    function connectSSE() {
+      // Close previous connection to prevent duplicate event listeners
+      if (_currentES) { _currentES.close(); _currentES = null; }
+      const es = new EventSource('/api/events');
+      _currentES = es;
+      const dot = document.getElementById('connectionDot');
+
+      es.addEventListener('connected', () => { dot.classList.add('connected'); _sseRetryDelay = 1000; });
+
+      function safeParse(e) { try { return JSON.parse(e.data); } catch { return null; } }
+
+      es.addEventListener('log', (e) => {
+        const data = safeParse(e); if (!data) return;
+        appendLog(data.text, data.level);
+      });
+
+      es.addEventListener('status', (e) => {
+        const data = safeParse(e); if (!data) return;
+        isPublishing = data.publishing;
+        updatePublishBtn();
+        document.getElementById('progressBanner').classList.toggle('visible', data.publishing);
+        if (!data.publishing) document.getElementById('cancelBtn').disabled = false;
+      });
+
+      es.addEventListener('progress', (e) => {
+        const data = safeParse(e); if (!data) return;
+        document.getElementById('progressText').textContent =
+          `正在发布 (${data.articleIndex + 1}/${data.articleCount}): ${data.title}`;
+      });
+
+      es.addEventListener('platform', (e) => {
+        const data = safeParse(e); if (!data) return;
+        updatePlatformStatus(data.platform, data.status);
+      });
+
+      es.addEventListener('done', (e) => {
+        const data = safeParse(e); if (!data) return;
+        const success = data.results.filter(r => r.success).length;
+        const fail = data.results.length - success;
+        showToast(`发布完成: ${success} 成功, ${fail} 失败`,
+          success === data.results.length ? 'success' : 'error');
+        for (const p of platforms) updatePlatformStatus(p.id, null);
+      });
+
+      es.addEventListener('cancelled', () => {
+        showToast('发布已取消', 'error');
+        for (const p of platforms) updatePlatformStatus(p.id, null);
+      });
+
+      es.addEventListener('login-check', (e) => {
+        const data = safeParse(e); if (!data) return;
+        const btn = document.getElementById('checkLoginBtn');
+        if (data.status === 'start') {
+          btn.disabled = true;
+          btn.textContent = '⏳ 检查中...';
+        } else if (data.status === 'done') {
+          btn.disabled = false;
+          btn.textContent = '🔑 检查登录';
+        }
+      });
+
+      es.addEventListener('login-status', (e) => {
+        const data = safeParse(e); if (!data) return;
+        loginStatus[data.id] = { loggedIn: data.loggedIn, username: data.username || '' };
+        // Debounce: parallel login checks fire 6 events in rapid succession
+        clearTimeout(_loginRenderTimer);
+        _loginRenderTimer = setTimeout(renderPlatforms, 100);
+      });
+
+      es.addEventListener('error', (e) => {
+        const data = safeParse(e);
+        if (data?.message) showToast(data.message, 'error');
+      });
+
+      es.onerror = () => {
+        dot.classList.remove('connected');
+        es.close();
+        _currentES = null;
+        setTimeout(connectSSE, _sseRetryDelay);
+        _sseRetryDelay = Math.min(_sseRetryDelay * 2, 30000); // exponential backoff, cap at 30s
+      };
+    }
+
+    // --- Rendering ---
+    function renderArticles() {
+      const container = document.getElementById('articleList');
+      const all = allArticles();
+
+      if (!all.length) {
+        container.innerHTML = '<div class="empty-state">' +
+          (settings.articleDir ? '该目录下没有找到文章文件（.md .markdown .txt 等）' : '请在设置中配置默认目录，或手动添加文件') +
+          '</div>';
+        return;
+      }
+
+      container.innerHTML = all.map((a, i) => {
+        const isManual = a.manual;
+        const sel = selectedArticles.has(i);
+        return `
+          <div class="article-item ${sel ? 'selected' : ''}" onclick="toggleArticle(${i}, event)">
+            <input type="checkbox" ${sel ? 'checked' : ''} onclick="event.stopPropagation();toggleArticle(${i}, event)">
+            <div class="article-info">
+              <div class="article-title">${esc(a.title)}</div>
+              <div class="article-meta">${esc(a.fileName)}${a.description ? ' — ' + esc(a.description.slice(0, 60)) : ''}</div>
+            </div>
+            ${isManual ? '<span class="article-badge">手动</span>' : ''}
+            ${isManual ? `<button class="article-remove" data-remove-path="${esc(a.filePath)}" title="移除">×</button>` : ''}
+          </div>`;
+      }).join('');
+    }
+
+    function renderPlatforms() {
+      // Publish tab — with status indicators + login info
+      const container = document.getElementById('platformGrid');
+      container.innerHTML = platforms.map(p => {
+        const ls = loginStatus[p.id];
+        let loginHtml = '';
+        if (ls) {
+          if (ls.loggedIn) {
+            loginHtml = `<span class="login-info logged-in" title="${esc(ls.username || '已登录')}">${esc(ls.username || '✓')}</span>`;
+          } else {
+            loginHtml = `<span class="login-info not-logged-in">未登录</span>`;
+          }
+        }
+        let iconFallback = '';
+        try { iconFallback = p.icon ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(new URL(p.icon).hostname)}&sz=32` : ''; } catch {}
+        const iconHtml = p.icon ? `<img src="${esc(p.icon)}" width="16" height="16" style="flex-shrink:0" onerror="this.onerror=null;this.src='${esc(iconFallback)}'">` : '';
+        return `
+        <div class="platform-chip ${selectedPlatforms.has(p.id) ? 'selected' : ''}" onclick="togglePlatform('${p.id}')">
+          <input type="checkbox" ${selectedPlatforms.has(p.id) ? 'checked' : ''} onclick="event.stopPropagation();togglePlatform('${p.id}')">
+          ${iconHtml}
+          <span title="${esc(p.name)}">${esc(p.name)}</span>
+          ${loginHtml}
+          <span class="platform-status" id="ps-${p.id}"></span>
+        </div>`;
+      }).join('');
+    }
+
+    function updatePlatformStatus(id, status) {
+      const el = document.getElementById('ps-' + id);
+      if (!el) return;
+      if (status === 'running') el.innerHTML = '<div class="spinner" style="width:12px;height:12px;border-width:1.5px"></div>';
+      else if (status === 'done') el.textContent = '✓';
+      else if (status === 'error') el.textContent = '✗';
+      else el.textContent = '';
+    }
+
+    function updatePublishBtn() {
+      const btn = document.getElementById('publishBtn');
+      const count = document.getElementById('publishCount');
+      const ac = selectedArticles.size;
+      const pc = selectedPlatforms.size;
+      btn.disabled = isPublishing || ac === 0 || pc === 0;
+      btn.textContent = isPublishing ? '发布中...' : '发布';
+      count.textContent = (ac && pc) ? `${ac} 篇文章 → ${pc} 个平台` : '';
+      // Disable file operations during publish to prevent article list mutation
+      document.querySelectorAll('.add-file-bar button, .add-file-bar input, .article-remove').forEach(el => {
+        el.disabled = isPublishing;
+        if (isPublishing) el.style.opacity = '0.4';
+        else el.style.opacity = '';
+      });
+    }
+
+    // --- Interaction ---
+    function toggleArticle(index, event) {
+      if (event) event.preventDefault();
+      if (selectedArticles.has(index)) selectedArticles.delete(index);
+      else selectedArticles.add(index);
+      renderArticles();
+      updatePublishBtn();
+    }
+
+    function selectAllArticles() {
+      allArticles().forEach((_, i) => selectedArticles.add(i));
+      renderArticles();
+      updatePublishBtn();
+    }
+
+    function deselectAllArticles() {
+      selectedArticles.clear();
+      renderArticles();
+      updatePublishBtn();
+    }
+
+    function clearAllArticles() {
+      if (isPublishing) return;
+      dirArticles = [];
+      manualArticles = [];
+      projectConfig = null;
+      invalidateArticleCache();
+      selectedArticles.clear();
+      renderArticles();
+      updatePublishBtn();
+      renderConfigBadge();
+    }
+
+    let _platformSaveTimer = null;
+    function togglePlatform(id) {
+      if (selectedPlatforms.has(id)) selectedPlatforms.delete(id);
+      else selectedPlatforms.add(id);
+      renderPlatforms();
+      updatePublishBtn();
+      // Debounced auto-save — wait 500ms after last toggle to batch rapid clicks
+      clearTimeout(_platformSaveTimer);
+      _platformSaveTimer = setTimeout(() => {
+        fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ defaultPlatforms: [...selectedPlatforms] }),
+        }).then(r => { if (!r.ok) throw r; }).catch(() => showToast('平台选择保存失败，重启后可能丢失', 'error'));
+      }, 500);
+    }
+
+    function switchTab(tabName) {
+      document.querySelectorAll('.tab-view').forEach(v => v.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById(tabName + 'View').classList.add('active');
+      const btn = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
+      if (btn) btn.classList.add('active');
+    }
+
+    // --- Web-based directory browser (no native dialog needed) ---
+    let _dirCurrent = '';
+
+    function pickSettingsDir() { openDirBrowser(); }
+
+    function openDirBrowser() {
+      document.getElementById('dirModal').classList.add('open');
+      const existing = document.getElementById('articleDir').value.trim();
+      loadDirEntries(existing || '');
+    }
+
+    function closeDirBrowser() { document.getElementById('dirModal').classList.remove('open'); }
+
+    function selectDirBrowser() {
+      if (_dirCurrent) document.getElementById('articleDir').value = _dirCurrent;
+      closeDirBrowser();
+    }
+
+    function dirBrowserUp() {
+      const pathEl = document.getElementById('dirPath');
+      const parent = pathEl.dataset.parent;
+      if (parent) loadDirEntries(parent);
+      else loadDirEntries('');
+    }
+
+    function dirBrowserRoot() { loadDirEntries(''); }
+
+    async function loadDirEntries(path) {
+      try {
+        const res = await fetch(`/api/browse-dir?path=${encodeURIComponent(path)}`);
+        const data = await res.json();
+        _dirCurrent = data.current || '';
+        const pathEl = document.getElementById('dirPath');
+        pathEl.textContent = _dirCurrent || '选择驱动器';
+        pathEl.scrollLeft = pathEl.scrollWidth;
+        pathEl.dataset.parent = data.parent || '';
+        document.getElementById('dirSelectBtn').disabled = !_dirCurrent;
+
+        const list = document.getElementById('dirList');
+        if (!data.entries?.length) {
+          list.innerHTML = '<div class="dir-empty">空目录</div>';
+          return;
+        }
+        list.innerHTML = data.entries.map(e =>
+          `<div class="dir-item" data-path="${esc(e.path)}" data-name="${esc(e.name)}"><span class="icon">📁</span> ${esc(e.name)}</div>`
+        ).join('');
+        list.scrollTop = 0;
+      } catch (err) {
+        showToast('浏览目录失败: ' + err.message, 'error');
+      }
+    }
+
+    function quickSelectDir(path, name, el) {
+      // Single click highlights; double click navigates into
+      document.querySelectorAll('.dir-item.active').forEach(e => e.classList.remove('active'));
+      el.classList.add('active');
+      _dirCurrent = path;
+      const pathEl = document.getElementById('dirPath');
+      pathEl.textContent = path;
+      pathEl.scrollLeft = pathEl.scrollWidth;
+      document.getElementById('dirSelectBtn').disabled = !path;
+    }
+
+    // Event delegation for directory browser — avoids inline handlers with escaped paths
+    (function setupDirListDelegation() {
+      const list = document.getElementById('dirList');
+      list.addEventListener('click', (e) => {
+        const item = e.target.closest('.dir-item');
+        if (!item) return;
+        quickSelectDir(item.dataset.path, item.dataset.name, item);
+      });
+      list.addEventListener('dblclick', (e) => {
+        const item = e.target.closest('.dir-item');
+        if (!item) return;
+        loadDirEntries(item.dataset.path);
+      });
+    })();
+
+    // Event delegation for article remove buttons — avoids inline handlers with escaped paths
+    document.getElementById('articleList').addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-remove-path]');
+      if (!btn) return;
+      e.stopPropagation();
+      removeManualArticle(btn.dataset.removePath);
+    });
+
+    // --- Log ---
+    const MAX_LOG_LINES = 500;
+    const _logIconMap = { '✓': '<span class="success">✓</span>', '⚠': '<span class="warn">⚠</span>', '✗': '<span class="error" style="color:var(--red)">✗</span>' };
+    let _logScrollTimer = null;
+
+    function appendLog(text, level) {
+      const body = document.getElementById('logBody');
+      const line = document.createElement('div');
+      line.className = 'log-line' + (level === 'error' ? ' error' : '');
+      const html = esc(text).replace(/[✓⚠✗]/g, c => _logIconMap[c] || c);
+      const now = new Date();
+      const ts = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+      line.innerHTML = `<span class="time">${ts}</span>${html}`;
+      body.appendChild(line);
+      // Trim old entries to prevent unbounded memory growth
+      while (body.childElementCount > MAX_LOG_LINES) body.removeChild(body.firstChild);
+      // Debounce scroll to avoid layout thrashing during rapid log bursts
+      if (!_logScrollTimer) {
+        _logScrollTimer = requestAnimationFrame(() => { body.scrollTop = body.scrollHeight; _logScrollTimer = null; });
+      }
+    }
+
+    function clearLog() { document.getElementById('logBody').innerHTML = ''; }
+
+    // --- Toast ---
+    let _toastTimer = null;
+    function showToast(msg, type = '') {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.className = 'toast show ' + type;
+      if (_toastTimer) clearTimeout(_toastTimer);
+      _toastTimer = setTimeout(() => { el.className = 'toast'; _toastTimer = null; }, 3500);
+    }
+
+    // --- Helpers ---
+    const _escMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+    function esc(str) {
+      return String(str).replace(/[&<>"']/g, c => _escMap[c]);
+    }
+
+    // --- Start ---
+    init();
+  </script>
+</body>
+</html>
