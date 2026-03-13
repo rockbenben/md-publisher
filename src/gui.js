@@ -554,7 +554,7 @@ app.post('/api/publish', asyncHandler(async (req, res) => {
     isPublishing = false;
     const errMsg = `解析文件失败:\n${parseErrors.join('\n')}`;
     broadcast('status', { publishing: false });
-    broadcast('error', { message: errMsg });
+    broadcast('app-error', { message: errMsg });
     return res.status(400).json({ error: errMsg });
   }
 
@@ -565,7 +565,7 @@ app.post('/api/publish', asyncHandler(async (req, res) => {
   // publishArticles uses try/finally to guarantee isPublishing reset
   publishAbort = new AbortController();
   publishTask = publishArticles(articles, validPlatformIds, { customText, category, tag }, publishAbort.signal).catch((err) => {
-    broadcast('error', { message: err?.message || String(err) });
+    broadcast('app-error', { message: err?.message || String(err) });
   }).finally(() => { publishTask = null; publishAbort = null; });
 }));
 
@@ -578,18 +578,20 @@ app.post('/api/cancel-publish', (req, res) => {
   res.json({ ok: true });
 });
 
+// --- Login status check (streamed via SSE, parallel in separate window) ---
+let isCheckingLogin = false;
+let keptOpenPages = []; // Pages kept open for unlogged platforms (cleaned up on re-check)
+
 // POST /api/close-browser — close Playwright browser
 app.post('/api/close-browser', asyncHandler(async (req, res) => {
   try {
+    keptOpenPages = [];
     await closeContext();
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 }));
-
-// --- Login status check (streamed via SSE, parallel in separate window) ---
-let isCheckingLogin = false;
 
 async function checkOnePlatform(page, config) {
   const checkUrl = config.checkUrl || config.url;
@@ -643,53 +645,20 @@ async function checkAllLoginStatus() {
     try {
       ctx = await getContext();
     } catch (err) {
-      broadcast('error', { message: `浏览器加载失败，无法检查登录状态: ${err.message}` });
+      broadcast('app-error', { message: `浏览器加载失败，无法检查登录状态: ${err.message}` });
       return;
     }
+
+    // Close pages kept open from previous check to prevent tab accumulation
+    await Promise.all(keptOpenPages.map(p => p.close().catch(() => {})));
+    keptOpenPages = [];
 
     const entries = Object.entries(PLATFORMS).filter(([, p]) => !p.hidden);
     const checkPages = [];
 
-    try {
-      // Open all check pages in a SEPARATE window via CDP, then check in parallel
-      const seedPage = ctx.pages()[0];
-      if (!seedPage) throw new Error('no seed page');
-
-      // Helper: wait for next page event with proper cleanup on timeout
-      function waitForPage(ctx, timeout) {
-        return new Promise((resolve, reject) => {
-          const t = setTimeout(() => { ctx.removeListener('page', onPage); reject(new Error('timeout')); }, timeout);
-          function onPage(p) { clearTimeout(t); resolve(p); }
-          ctx.once('page', onPage);
-        });
-      }
-
-      // First page → new window (navigate to first platform URL directly, no about:blank)
-      const firstUrl = entries[0][1].checkUrl || entries[0][1].url;
-      const cdp = await ctx.newCDPSession(seedPage);
-      const firstP = waitForPage(ctx, 5000);
-      try {
-        await cdp.send('Target.createTarget', { url: firstUrl, newWindow: true });
-      } finally {
-        await cdp.detach().catch(() => {});
-      }
-      const firstPage = await firstP;
-      checkPages.push(firstPage);
-
-      // Remaining pages → window.open from first page (guarantees same window)
-      for (let i = 1; i < entries.length; i++) {
-        const targetUrl = entries[i][1].checkUrl || entries[i][1].url;
-        const pp = waitForPage(ctx, 3000);
-        await firstPage.evaluate((u) => window.open(u), targetUrl);
-        checkPages.push(await pp);
-      }
-    } catch {
-      // Fallback: regular tabs in existing window
-      for (const p of checkPages) await p.close().catch(() => {});
-      checkPages.length = 0;
-      for (let i = 0; i < entries.length; i++) {
-        try { checkPages.push(await ctx.newPage()); } catch { break; }
-      }
+    // Open check pages as new tabs in the same window
+    for (let i = 0; i < entries.length; i++) {
+      try { checkPages.push(await ctx.newPage()); } catch { break; }
     }
 
     // Navigate and check all platforms in parallel — fast
@@ -706,8 +675,19 @@ async function checkAllLoginStatus() {
       })
     );
 
-    // Close all check pages — window closes automatically when last tab closes
-    await Promise.all(checkPages.map(p => p.close().catch(() => {})));
+    // Close only logged-in pages — keep unlocked ones open for manual login
+    const newKeptOpen = [];
+    await Promise.all(
+      entries.map(async ([id], i) => {
+        if (i >= checkPages.length) return;
+        if (lastLoginResults[id]?.loggedIn) {
+          await checkPages[i].close().catch(() => {});
+        } else {
+          newKeptOpen.push(checkPages[i]);
+        }
+      })
+    );
+    keptOpenPages = newKeptOpen;
 
     // Persist login status to settings so it survives restarts
     try {

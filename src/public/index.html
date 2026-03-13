@@ -1202,7 +1202,7 @@
         _loginRenderTimer = setTimeout(renderPlatforms, 100);
       });
 
-      es.addEventListener('error', (e) => {
+      es.addEventListener('app-error', (e) => {
         const data = safeParse(e);
         if (data?.message) showToast(data.message, 'error');
       });
@@ -1257,9 +1257,7 @@
             loginHtml = `<span class="login-info not-logged-in">未登录</span>`;
           }
         }
-        let iconFallback = '';
-        try { iconFallback = p.icon ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(new URL(p.icon).hostname)}&sz=32` : ''; } catch {}
-        const iconHtml = p.icon ? `<img src="${esc(p.icon)}" width="16" height="16" style="flex-shrink:0" onerror="this.onerror=null;this.src='${esc(iconFallback)}'">` : '';
+        const iconHtml = p.icon ? `<img src="${esc(p.icon)}" width="16" height="16" style="flex-shrink:0">` : '';
         return `
         <div class="platform-chip ${selectedPlatforms.has(p.id) ? 'selected' : ''}" onclick="togglePlatform('${p.id}')">
           <input type="checkbox" ${selectedPlatforms.has(p.id) ? 'checked' : ''} onclick="event.stopPropagation();togglePlatform('${p.id}')">
