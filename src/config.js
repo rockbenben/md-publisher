@@ -3,7 +3,7 @@
 export const PLATFORMS = {
   sspai: {
     name: '少数派',
-    icon: 'https://sspai.com/favicon.ico',
+    icon: '/icons/sspai.ico',
     url: 'https://sspai.com/write',
     // Editor-specific elements are the most reliable login indicator
     loggedInSelector: 'input[placeholder*="标题"], .sspai-header-user, [class*="avatar"]',
@@ -15,7 +15,7 @@ export const PLATFORMS = {
   },
   zhihu: {
     name: '知乎',
-    icon: 'https://www.zhihu.com/favicon.ico',
+    icon: '/icons/zhihu.ico',
     url: 'https://zhuanlan.zhihu.com/write',
     loggedInSelector: 'textarea[placeholder*="标题"], .AppHeader-profile, .AppHeader-profileAvatar, .PublishEditor',
     loginUrlPattern: /signin|login/,
@@ -26,7 +26,7 @@ export const PLATFORMS = {
   },
   wechat: {
     name: '公众号',
-    icon: 'https://mp.weixin.qq.com/favicon.ico',
+    icon: '/icons/wechat.png',
     url: 'https://mp.weixin.qq.com/',
     converterUrl: 'https://md.doocs.org/',
     loggedInSelector: '.weui-desktop-account__nickname, .new-creation__menu, [class*="nickname"]',
@@ -37,7 +37,7 @@ export const PLATFORMS = {
   },
   smzdm: {
     name: '什么值得买',
-    icon: 'https://www.smzdm.com/favicon.ico',
+    icon: '/icons/smzdm.ico',
     url: 'https://post.smzdm.com/tougao/',
     // "发布新文章" link is the most reliable indicator on tougao page
     loggedInSelector: 'a[href*="/edit/"], .release-new, .J_user_name',
@@ -47,7 +47,7 @@ export const PLATFORMS = {
   },
   juejin: {
     name: '掘金',
-    icon: 'https://juejin.cn/favicon.ico',
+    icon: '/icons/juejin.svg',
     url: 'https://juejin.cn/editor/drafts/new?v=2',
     // Editor elements confirm both login AND page ready
     loggedInSelector: '.title-input, .bytemd, .bytemd-editor',
@@ -58,7 +58,7 @@ export const PLATFORMS = {
   },
   x: {
     name: 'X',
-    icon: 'https://x.com/favicon.ico',
+    icon: '/icons/x.png',
     url: 'https://x.com/',
     loggedInSelector: '[data-testid="AppTabBar_Profile_Link"], [data-testid="SideNav_AccountSwitcher_Button"]',
     loginUrlPattern: /\/i\/flow\/login/,
