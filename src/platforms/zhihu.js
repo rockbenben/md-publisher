@@ -1,6 +1,7 @@
 import chalk from 'chalk';
 import { PLATFORMS } from '../config.js';
 import { withPage, ensureLoggedIn, pasteText, findElement, MOD } from '../browser.js';
+import { preprocessCallouts, prepareCoverImage, injectCoverToInput, stripFirstImage } from '../parser.js';
 
 const config = PLATFORMS.zhihu;
 
@@ -45,10 +46,15 @@ function transformContent(content) {
 export async function publish(article, options = {}) {
   console.log(chalk.blue(`\n📝 正在发布到 ${config.name}...`));
 
-  const transformed = transformContent(article.content);
-
   return withPage(config.url, async (page) => {
     await ensureLoggedIn(page, config);
+
+    // Prepare cover early (extract URL from original content before any stripping)
+    const coverB64 = await prepareCoverImage(page, article).catch(() => null);
+
+    let content = article.content;
+    if (options.removeCoverImg && coverB64) content = stripFirstImage(content);
+    const transformed = transformContent(preprocessCallouts(content));
 
     let filledTitle = false;
     let filledContent = false;
@@ -78,7 +84,7 @@ export async function publish(article, options = {}) {
       const confirmClick = Promise.any([p1, p2]).catch(() => null);
 
       await pasteText(page, editorEl.selector, transformed);
-      console.log(chalk.green('   ✓ 已粘贴文章内容（已去除图片行空行）'));
+      console.log(chalk.green('   ✓ 已粘贴文章内容'));
       filledContent = true;
 
       const method = await confirmClick;
@@ -95,11 +101,25 @@ export async function publish(article, options = {}) {
     const categories = article.meta.category?.length ? article.meta.category : options.category;
     const tags = article.meta.tag?.length ? article.meta.tag : options.tag;
     if (filledContent && (categories?.length || tags?.length)) {
-      console.log(chalk.gray(`   ℹ ${config.name} 暂不支持自动填写分类/标签`));
+      console.log(chalk.gray('   ℹ 分类/标签请手动设置'));
     }
 
-    const parts = [filledTitle && '标题', filledContent && '内容'].filter(Boolean);
-    const message = parts.length ? `已填充${parts.join('和')}` : '未能自动填充，请手动操作';
+    // Step 3: Set cover image (first article image)
+    let setCover = false;
+    if (coverB64 && await page.locator('.UploadPicture-input').count() > 0) {
+      console.log(chalk.gray('   ℹ 正在上传封面图片...'));
+      try {
+        await injectCoverToInput(page, '.UploadPicture-input', coverB64);
+        await page.waitForTimeout(3000);
+        setCover = true;
+        console.log(chalk.green('   ✓ 已设置封面图片'));
+      } catch (err) {
+        console.log(chalk.yellow(`   ⚠ 封面图片设置失败: ${err.message}`));
+      }
+    }
+
+    const parts = [filledTitle && '标题', filledContent && '内容', setCover && '封面'].filter(Boolean);
+    const message = parts.length ? `已填充${parts.join('、')}` : '未能自动填充，请手动操作';
     return { success: filledContent, platform: config.name, message };
   });
 }

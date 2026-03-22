@@ -1,6 +1,7 @@
 import chalk from 'chalk';
 import { PLATFORMS } from '../config.js';
 import { withPage, ensureLoggedIn, pasteText, findElement, MOD } from '../browser.js';
+import { preprocessCallouts, prepareCoverImage, injectCoverToInput, stripFirstImage } from '../parser.js';
 
 const config = PLATFORMS.sspai;
 
@@ -8,7 +9,7 @@ const config = PLATFORMS.sspai;
  * Transform content for 少数派: remove image optimization params.
  */
 function transformContent(content) {
-  return content.replace(/\?imageMogr2\/format\/webp/g, '');
+  return preprocessCallouts(content).replace(/\?imageMogr2\/format\/webp/g, '');
 }
 
 /**
@@ -20,8 +21,6 @@ function transformContent(content) {
  */
 export async function publish(article, options = {}) {
   console.log(chalk.blue(`\n📝 正在发布到 ${config.name}...`));
-
-  const transformed = transformContent(article.content);
 
   return withPage(config.url, async (page) => {
     await ensureLoggedIn(page, config);
@@ -42,7 +41,13 @@ export async function publish(article, options = {}) {
       console.log(chalk.yellow('   ⚠ 未找到标题输入框，请手动填写'));
     }
 
+    // Prepare cover early (extract URL from original content before any stripping)
+    const coverB64 = await prepareCoverImage(page, article).catch(() => null);
+
     // Step 2: Paste markdown into CKEditor body
+    let content = article.content;
+    if (options.removeCoverImg && coverB64) content = stripFirstImage(content);
+    const transformed = transformContent(content);
     const editorEl = await findElement(page, ['.ck-editor__editable', '.ck-content', '.ck-editor__editable_inline', '.wangEditor-txt', '.ProseMirror', '[contenteditable="true"]', 'div[role="textbox"]']);
     if (editorEl) {
       await pasteText(page, editorEl.selector, transformed);
@@ -64,11 +69,31 @@ export async function publish(article, options = {}) {
     const categories = article.meta.category?.length ? article.meta.category : options.category;
     const tags = article.meta.tag?.length ? article.meta.tag : options.tag;
     if (filledContent && (categories?.length || tags?.length)) {
-      console.log(chalk.gray(`   ℹ ${config.name} 暂不支持自动填写分类/标签`));
+      console.log(chalk.gray('   ℹ 分类/标签请手动设置'));
     }
 
-    const parts = [filledTitle && '标题', filledContent && '内容'].filter(Boolean);
-    const message = parts.length ? `已填充${parts.join('和')}` : '未能自动填充，请手动操作';
+    // Step 4: Set cover image (first article image)
+    let setCover = false;
+    if (coverB64 && await page.locator('.upload-image-container input[type="file"]').count() > 0) {
+      console.log(chalk.gray('   ℹ 正在上传封面图片...'));
+      try {
+        await injectCoverToInput(page, '.upload-image-container input[type="file"]', coverB64);
+        await page.waitForTimeout(3000);
+        if (options.autoCover !== false) {
+          try {
+            await page.getByText('裁切并使用', { exact: true }).click({ timeout: 5000 });
+            await page.waitForTimeout(1000);
+          } catch {}
+        }
+        setCover = true;
+        console.log(chalk.green('   ✓ 已设置封面图片'));
+      } catch (err) {
+        console.log(chalk.yellow(`   ⚠ 封面图片设置失败: ${err.message}`));
+      }
+    }
+
+    const parts = [filledTitle && '标题', filledContent && '内容', setCover && '封面'].filter(Boolean);
+    const message = parts.length ? `已填充${parts.join('、')}` : '未能自动填充，请手动操作';
     return { success: filledContent, platform: config.name, message };
   });
 }
