@@ -614,7 +614,7 @@
     <div class="section">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
         <div class="section-header" style="margin-bottom:0">平台</div>
-        <button class="btn-secondary" style="padding:4px 10px;font-size:12px" id="checkLoginBtn" onclick="checkLoginStatus()">🔑 检查登录</button>
+        <button class="btn-secondary" style="padding:4px 10px;font-size:12px" id="checkLoginBtn" onclick="checkLoginStatus()" title="并行检测所有平台的登录状态">🔑 检测登录</button>
       </div>
       <div id="platformGrid" class="platform-grid"></div>
     </div>
@@ -625,8 +625,16 @@
     <!-- Actions -->
     <div class="actions-bar">
       <button class="btn-publish" id="publishBtn" onclick="startPublish()" disabled>发布</button>
-      <button class="btn-secondary" onclick="closeBrowser()" title="关闭 Playwright 控制的自动化 Chrome 窗口，不影响本页面">关闭发布窗口</button>
+      <button class="btn-secondary" onclick="closeBrowser()" title="关闭自动化浏览器窗口，释放资源（不影响本页面）">关闭浏览器</button>
       <span class="publish-count" id="publishCount"></span>
+      <span style="margin-left:auto;display:flex;align-items:center;gap:12px">
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;color:var(--text-secondary);cursor:pointer;user-select:none">
+          <input type="checkbox" id="autoCoverCheck" checked onchange="saveCoverSettings()"> 封面自动确认
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;color:var(--text-secondary);cursor:pointer;user-select:none" title="首图已作为封面使用，避免正文重复显示">
+          <input type="checkbox" id="removeCoverImgCheck" checked onchange="saveCoverSettings()"> 正文去除首图
+        </label>
+      </span>
     </div>
 
     <!-- Log Panel -->
@@ -708,6 +716,7 @@
 
     // --- Init ---
     async function init() {
+      restoreCoverSettings();
       try {
         await loadPlatforms();
         await loadSettingsFromServer();
@@ -1066,6 +1075,8 @@
             filePaths, platforms: platformIds,
             category: projectConfig?.category,
             tag: projectConfig?.tag,
+            autoCover: document.getElementById('autoCoverCheck').checked,
+            removeCoverImg: document.getElementById('removeCoverImgCheck').checked,
           }),
         });
         if (!res.ok) {
@@ -1093,15 +1104,15 @@
     async function closeBrowser() {
       try {
         await fetch('/api/close-browser', { method: 'POST' });
-        showToast('发布窗口已关闭', 'success');
+        showToast('浏览器已关闭', 'success');
       } catch {
-        showToast('关闭发布窗口失败', 'error');
+        showToast('关闭浏览器失败', 'error');
       }
     }
 
     async function checkLoginStatus() {
       if (isPublishing) {
-        showToast('发布中，请等待完成后再检查', 'error');
+        showToast('请等待发布完成', 'error');
         return;
       }
       try {
@@ -1111,13 +1122,13 @@
         }
         // Results arrive via SSE events — no need to wait here
       } catch (err) {
-        showToast('检查登录状态失败: ' + err.message, 'error');
+        showToast('登录检测失败: ' + err.message, 'error');
       }
     }
 
     async function shutdownApp() {
       if (isPublishing) {
-        showToast('发布中，请等待完成后再退出', 'error');
+        showToast('请等待发布完成', 'error');
         return;
       }
       if (!confirm('确认退出 md-publisher？')) return;
@@ -1190,7 +1201,7 @@
           btn.textContent = '⏳ 检查中...';
         } else if (data.status === 'done') {
           btn.disabled = false;
-          btn.textContent = '🔑 检查登录';
+          btn.textContent = '🔑 检测登录';
         }
       });
 
@@ -1470,6 +1481,24 @@
       el.className = 'toast show ' + type;
       if (_toastTimer) clearTimeout(_toastTimer);
       _toastTimer = setTimeout(() => { el.className = 'toast'; _toastTimer = null; }, 3500);
+    }
+
+    // --- Cover settings persistence ---
+    function saveCoverSettings() {
+      const data = {
+        autoCover: document.getElementById('autoCoverCheck').checked,
+        removeCoverImg: document.getElementById('removeCoverImgCheck').checked,
+      };
+      try { localStorage.setItem('coverSettings', JSON.stringify(data)); } catch {}
+    }
+    function restoreCoverSettings() {
+      try {
+        const data = JSON.parse(localStorage.getItem('coverSettings'));
+        if (data) {
+          document.getElementById('autoCoverCheck').checked = data.autoCover !== false;
+          document.getElementById('removeCoverImgCheck').checked = data.removeCoverImg !== false;
+        }
+      } catch {}
     }
 
     // --- Helpers ---

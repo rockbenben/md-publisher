@@ -159,6 +159,7 @@ async function publishArticles(articles, platformIds, options = {}, signal = nul
       if (signal?.aborted) { cancelled = true; broadcast('cancelled', {}); break; }
 
       const article = articles[i];
+
       broadcast('progress', {
         articleIndex: i,
         articleCount: articles.length,
@@ -520,7 +521,7 @@ app.post('/api/resolve-dir', asyncHandler(async (req, res) => {
 
 // POST /api/publish — start publishing
 app.post('/api/publish', asyncHandler(async (req, res) => {
-  const { filePaths, platforms, category, tag } = req.body;
+  const { filePaths, platforms, category, tag, autoCover, removeCoverImg } = req.body;
 
   if (isPublishing) {
     return res.status(409).json({ error: '已有发布任务正在进行' });
@@ -567,7 +568,7 @@ app.post('/api/publish', asyncHandler(async (req, res) => {
   // Run publishing in background — store promise as lock
   // publishArticles uses try/finally to guarantee isPublishing reset
   publishAbort = new AbortController();
-  publishTask = publishArticles(articles, validPlatformIds, { category, tag }, publishAbort.signal).catch((err) => {
+  publishTask = publishArticles(articles, validPlatformIds, { category, tag, autoCover: autoCover !== false, removeCoverImg: !!removeCoverImg }, publishAbort.signal).catch((err) => {
     broadcast('app-error', { message: err?.message || String(err) });
   }).finally(() => { publishTask = null; publishAbort = null; });
 }));

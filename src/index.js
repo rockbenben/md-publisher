@@ -89,6 +89,7 @@ async function main() {
         const result = await publishFn(article, {
           category: projectConfig?.category,
           tag: projectConfig?.tag,
+          removeCoverImg: !process.argv.includes('--keep-cover-img'),
         });
         allResults.push({ ...result, articleTitle });
       } catch (error) {
