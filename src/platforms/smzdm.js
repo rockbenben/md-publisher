@@ -2,6 +2,7 @@ import chalk from 'chalk';
 import { marked } from 'marked';
 import { PLATFORMS } from '../config.js';
 import { withPage, ensureLoggedIn, pasteHtml, findElement, MOD } from '../browser.js';
+import { preprocessCallouts } from '../parser.js';
 
 const config = PLATFORMS.smzdm;
 
@@ -48,7 +49,7 @@ export async function publish(article, options = {}) {
     }
 
     // Step 3: Convert markdown to HTML, paste as rich text into ProseMirror
-    const html = marked(article.content);
+    const html = marked(preprocessCallouts(article.content));
 
     const editorEl = await findElement(page, ['.ProseMirror', '[contenteditable="true"]', 'div[data-placeholder="请输入正文"]']);
     if (editorEl) {
@@ -59,49 +60,8 @@ export async function publish(article, options = {}) {
       console.log(chalk.yellow('   ⚠ 未找到编辑器，请手动粘贴内容'));
     }
 
-    // Try to fill category and tags
-    const categories = article.meta.category?.length ? article.meta.category : options.category;
-    const tags = article.meta.tag?.length ? article.meta.tag : options.tag;
-
-    if (filledContent && categories?.length) {
-      try {
-        const catSelect = await findElement(page, ['.editor-tag-select', '.category-select', '[class*="category"]'], 3000);
-        if (catSelect) {
-          await page.click(catSelect.selector);
-          await page.waitForTimeout(300);
-          for (const cat of categories) {
-            try {
-              await page.getByText(cat, { exact: true }).click({ timeout: 2000 });
-              console.log(chalk.green(`   ✓ 已选择分类: ${cat}`));
-              break;
-            } catch { /* try next */ }
-          }
-        }
-      } catch {
-        console.log(chalk.yellow('   ⚠ 未能自动选择分类'));
-      }
-    }
-
-    if (filledContent && tags?.length) {
-      try {
-        const tagInput = await findElement(page, ['input[placeholder*="标签"]', 'input[placeholder*="tag"]', '.tag-input input'], 3000);
-        if (tagInput) {
-          const tagsToFill = tags.slice(0, 5);
-          for (const tag of tagsToFill) {
-            await page.click(tagInput.selector);
-            await page.keyboard.type(tag);
-            await page.keyboard.press('Enter');
-            await page.waitForTimeout(300);
-          }
-          console.log(chalk.green(`   ✓ 已填写标签: ${tagsToFill.join(', ')}`));
-        }
-      } catch {
-        console.log(chalk.yellow('   ⚠ 未能自动填写标签'));
-      }
-    }
-
     const parts = [filledTitle && '标题', filledContent && '内容'].filter(Boolean);
-    const message = parts.length ? `已填充${parts.join('和')}` : '未能自动填充，请手动操作';
+    const message = parts.length ? `已填充${parts.join('、')}` : '未能自动填充，请手动操作';
     return { success: filledContent, platform: config.name, message };
   });
 }
