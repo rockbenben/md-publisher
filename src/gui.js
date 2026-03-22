@@ -530,8 +530,11 @@ app.post('/api/publish', asyncHandler(async (req, res) => {
     return res.status(400).json({ error: '请选择文章和平台' });
   }
 
-  // Validate platform IDs before starting
-  const validPlatformIds = platforms.filter(id => id in PLATFORMS && id in platformPublishers);
+  // Validate and sort platform IDs to match config order
+  const platformOrder = Object.keys(PLATFORMS);
+  const validPlatformIds = platforms
+    .filter(id => id in PLATFORMS && id in platformPublishers)
+    .sort((a, b) => platformOrder.indexOf(a) - platformOrder.indexOf(b));
   if (validPlatformIds.length === 0) {
     return res.status(400).json({ error: '没有有效的平台' });
   }
