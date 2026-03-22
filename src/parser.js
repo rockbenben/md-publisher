@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync, statSync, existsSync } from 'fs';
 import { readdir, stat, readFile, access } from 'fs/promises';
-import { join, extname, basename } from 'path';
+import { join, extname, basename, resolve, dirname } from 'path';
 import matter from 'gray-matter';
 import { PLATFORMS } from './config.js';
 
@@ -231,4 +231,115 @@ export async function scanArticleDirAsync(dirPath, { recursive = false } = {}) {
   }
 
   return articles;
+}
+
+// ─── Markdown preprocessing (shared across platforms) ────────────────────────
+
+const CALLOUT_EMOJI = {
+  NOTE: '\u2139\uFE0F',       // ℹ️ 
+  TIP: '\uD83D\uDCA1',        // 💡 
+  IMPORTANT: '\uD83D\uDCE2',  // 📢 
+  WARNING: '\u26A0\uFE0F',    // ⚠️ 
+  CAUTION: '\uD83D\uDED1',    // 🛑 
+};
+
+/** Convert GitHub callout syntax `> [!TYPE]` to emoji label. */
+export function preprocessCallouts(markdown) {
+  return markdown.replace(
+    /^(>\s*)\[!(WARNING|IMPORTANT|CAUTION|NOTE|TIP)\]\s*$/gm,
+    (_m, prefix, type) => `${prefix}${CALLOUT_EMOJI[type]} **${type.charAt(0) + type.slice(1).toLowerCase()}**  `
+  );
+}
+
+// ─── Cover image helpers (shared across platforms) ───────────────────────────
+
+/** Remove the first markdown image line from content (for platforms that use it as cover). */
+export function stripFirstImage(content) {
+  return content.replace(/^\s*!\[[^\]]*\]\([^)]+\)\s*$/m, '').replace(/^\n{2,}/, '\n');
+}
+
+const MAX_COVER_SIZE = 5242880; // 5MB
+
+/**
+ * Prepare cover image base64 for upload. Downloads once, converts once, caches on article.
+ * - Downloads the first image from article markdown (cached in article._coverRaw)
+ * - If format unsupported or oversized, converts to JPEG via Canvas (cached in article._coverJpegB64)
+ * @param {Page} page - Playwright page (for Canvas compression)
+ * @param {object} article - Article object (result cached on it)
+ * @param {object} [opts]
+ * @param {boolean} [opts.acceptWebp=false] - Whether the platform accepts webp
+ * @param {number} [opts.maxSize=5242880] - Max file size in bytes
+ * @returns {Promise<string|null>} base64 string or null
+ */
+export async function prepareCoverImage(page, article, { acceptWebp = false, maxSize = MAX_COVER_SIZE } = {}) {
+  // 1. Download raw image (cached per article across platforms)
+  if (article._coverRaw === undefined) {
+    article._coverRaw = null;
+    const imgSrc = (article.content.match(/!\[[^\]]*\]\(([^)]+)\)/) || [])[1];
+    if (imgSrc) {
+      try {
+        const src = imgSrc.trim().replace(/\?imageMogr2\/format\/webp$/, '');
+        if (/^https?:\/\//.test(src)) {
+          const res = await fetch(src);
+          if (res.ok) article._coverRaw = Buffer.from(await res.arrayBuffer());
+        } else {
+          article._coverRaw = await readFile(resolve(dirname(article.filePath), src));
+        }
+      } catch {}
+    }
+  }
+  if (!article._coverRaw) return null;
+
+  // 2. Check if raw image is already usable
+  const buf = article._coverRaw;
+  const isJpeg = buf[0] === 0xFF && buf[1] === 0xD8;
+  const isPng = buf[0] === 0x89 && buf[1] === 0x50;
+  const isWebp = buf.length > 12 && buf.slice(8, 12).toString() === 'WEBP';
+  const formatOk = isJpeg || isPng || (isWebp && acceptWebp);
+
+  if (formatOk && buf.length <= maxSize) return buf.toString('base64');
+
+  // 3. Convert to JPEG via Canvas (cached per article)
+  if (!article._coverJpegB64) {
+    const mime = isJpeg ? 'image/jpeg' : isPng ? 'image/png' : 'image/webp';
+    article._coverJpegB64 = await page.evaluate(({ data, mime, maxSize }) => {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          canvas.getContext('2d').drawImage(img, 0, 0);
+          for (let q = 0.85; q >= 0.1; q -= 0.15) {
+            const url = canvas.toDataURL('image/jpeg', q);
+            if (url.length * 0.75 <= maxSize) return resolve(url.split(',')[1]);
+          }
+          resolve(canvas.toDataURL('image/jpeg', 0.1).split(',')[1]);
+        };
+        img.onerror = () => reject(new Error('image decode failed'));
+        img.src = `data:${mime};base64,` + data;
+      });
+    }, { data: buf.toString('base64'), mime, maxSize });
+  }
+  return article._coverJpegB64;
+}
+
+/**
+ * Inject a base64 image into a file input via DataTransfer (works with Vue/React).
+ * @param {Page} page - Playwright page
+ * @param {string} selector - CSS selector for the file input
+ * @param {string} base64Data - base64 encoded image data
+ */
+export async function injectCoverToInput(page, selector, base64Data) {
+  await page.evaluate(({ data, selector }) => {
+    const bin = atob(data);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const file = new File([bytes], 'cover.jpg', { type: 'image/jpeg' });
+    const input = document.querySelector(selector);
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    input.files = dt.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }, { data: base64Data, selector });
 }
