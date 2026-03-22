@@ -59,11 +59,13 @@ export const PLATFORMS = {
   x: {
     name: 'X',
     icon: '/icons/x.png',
-    url: 'https://x.com/',
+    url: 'https://x.com/compose/articles',
+    checkUrl: 'https://x.com/',
     loggedInSelector: '[data-testid="AppTabBar_Profile_Link"], [data-testid="SideNav_AccountSwitcher_Button"]',
     loginUrlPattern: /\/i\/flow\/login/,
     checkSelector: '[data-testid="AppTabBar_Profile_Link"]',
-    hidden: true, // X only posts custom text, not article content — hide from default UI
+    // Username: @handle from profile link (most reliable), fallback to account switcher display name
+    usernameJs: '(document.querySelector("[data-testid=AppTabBar_Profile_Link]")?.getAttribute("href")?.replace(/^\\//, "") || "").trim() || (document.querySelector("[data-testid=SideNav_AccountSwitcher_Button] [dir=ltr]")?.textContent || "").trim()',
   },
 };
 

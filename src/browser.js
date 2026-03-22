@@ -162,6 +162,30 @@ export async function pasteHtml(page, selector, html) {
 }
 
 /**
+ * Paste an image into the currently focused element via clipboard.
+ * Reads the image as a PNG blob and writes it to the clipboard, then Ctrl+V.
+ * @param {import('playwright').Page} page
+ * @param {Buffer} imageBuffer - Raw image bytes (PNG or JPEG)
+ * @param {string} mimeType - e.g. 'image/png' or 'image/jpeg'
+ */
+export async function pasteImage(page, imageBuffer, mimeType = 'image/png') {
+  const b64 = imageBuffer.toString('base64');
+  const ok = await page.evaluate(async ({ b64Data, mime }) => {
+    try {
+      const bin = atob(b64Data);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const blob = new Blob([bytes], { type: mime });
+      await navigator.clipboard.write([new ClipboardItem({ [mime]: blob })]);
+      return true;
+    } catch { return false; }
+  }, { b64Data: b64, mime: mimeType });
+  if (!ok) throw new Error('图片剪贴板写入失败');
+  await page.keyboard.press(`${MOD}+V`);
+  await page.waitForTimeout(TIMEOUTS.pasteAfterKeys);
+}
+
+/**
  * Paste text by simulating Ctrl+V on the currently focused element.
  */
 export async function pasteToFocused(page, text) {

@@ -58,16 +58,7 @@ async function main() {
     return;
   }
 
-  // Step 3: If X is selected, prompt for custom tweet text (project config provides default)
-  let customText;
-  if (selectedPlatforms.includes('x')) {
-    customText = await input({
-      message: '请输入 X 发推文案:',
-      default: projectConfig?.customText || '',
-    });
-  }
-
-  // Step 4: Confirm
+  // Step 3: Confirm
   const platformNames = selectedPlatforms.map((k) => PLATFORMS[k].name).join(', ');
   const titleList = articles.map(a => a.meta.title || basename(a.filePath, extname(a.filePath))).join('、');
   const confirmed = await confirm({
@@ -96,7 +87,6 @@ async function main() {
       if (!publishFn) continue;
       try {
         const result = await publishFn(article, {
-          customText,
           category: projectConfig?.category,
           tag: projectConfig?.tag,
         });
