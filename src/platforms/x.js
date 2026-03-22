@@ -5,6 +5,7 @@ import chalk from 'chalk';
 import { marked } from 'marked';
 import { PLATFORMS, TIMEOUTS } from '../config.js';
 import { withPage, ensureLoggedIn, pasteHtml, findElement, MOD } from '../browser.js';
+import { preprocessCallouts, stripFirstImage } from '../parser.js';
 
 const config = PLATFORMS.x;
 
@@ -19,21 +20,6 @@ const EDITOR_SELECTORS = [
 const IMG_MARKER_PREFIX = '\u200B___IMG_';
 const CODE_MARKER_PREFIX = '\u200B___CODE_';
 const MARKER_SUFFIX = '___\u200B';
-
-// ─── Markdown preprocessing ──────────────────────────────────────────────────
-
-const CALLOUT_EMOJI = {
-  WARNING: '\u26A0\uFE0F', IMPORTANT: '\u2757', CAUTION: '\uD83D\uDD34',
-  NOTE: '\uD83D\uDCDD', TIP: '\uD83D\uDCA1',
-};
-
-/** Convert GitHub callout syntax `> [!TYPE]` to emoji label before marked() */
-function preprocessCallouts(markdown) {
-  return markdown.replace(
-    /^(>\s*)\[!(WARNING|IMPORTANT|CAUTION|NOTE|TIP)\]\s*$/gm,
-    (_m, prefix, type) => `${prefix}${CALLOUT_EMOJI[type]} **${type.charAt(0) + type.slice(1).toLowerCase()}**  `
-  );
-}
 
 /**
  * Normalize headings to two levels: highest → h1, next → h2.
@@ -358,13 +344,9 @@ export async function publish(article, options = {}) {
   console.log(chalk.blue(`\n📝 正在发布到 ${config.name}...`));
 
   return withPage(config.url, async (page) => {
-    // ── Retry if page gets stuck (blank HTML without <body>/#react-root) ──
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      if (await page.$('#react-root')) break;
-      if (attempt === 3) throw new Error('页面多次加载失败，请检查网络后重试');
-      console.log(chalk.yellow(`   ⚠ 页面未加载，刷新重试 (${attempt}/3)...`));
-      await page.reload({ waitUntil: 'domcontentloaded', timeout: TIMEOUTS.navigation }).catch(() => {});
-    }
+    // ── Auto-reload once after 2s to avoid X's frequent blank page issue ──
+    await page.waitForTimeout(2000);
+    await page.goto(config.url).catch(() => {});
 
     await ensureLoggedIn(page, config);
 
@@ -410,7 +392,9 @@ export async function publish(article, options = {}) {
     }
 
     // ── Parse content ──
-    const { segments, images, codeBlocks } = parseSegments(article.content, article.filePath);
+    // If removeCoverImg, strip first image from content (it's used as cover via Phase 4)
+    const contentForParse = options.removeCoverImg ? stripFirstImage(article.content) : article.content;
+    const { segments, images, codeBlocks } = parseSegments(contentForParse, article.filePath);
     const textCount = segments.filter(s => s.type === 'text').length;
     console.log(chalk.gray(`   ℹ 解析: ${textCount} 段文本, ${images.length} 张图片, ${codeBlocks.length} 个代码块`));
 
@@ -461,7 +445,7 @@ export async function publish(article, options = {}) {
     }
     await pasteHtml(page, editorEl.selector, fullHtml);
     filledContent = true;
-    console.log(chalk.green('   ✓ 已粘贴全部文本（含图片标记）'));
+    console.log(chalk.green('   ✓ 已粘贴文章内容'));
 
     // ── Phase 2: Upload all images via dialog (they append at the end) ──
     for (const img of images) {
@@ -507,20 +491,37 @@ export async function publish(article, options = {}) {
         if (result.movedCode > 0) moved.push(`${result.movedCode} 个代码块`);
         console.log(chalk.green(`   ✓ 已定位 ${moved.join(' + ')}`));
       } else {
-        console.log(chalk.yellow(`   ⚠ 标记替换失败: ${result.error}`));
+        console.log(chalk.yellow(`   ⚠ 内容定位失败: ${result.error}`));
       }
     }
 
-    // ── Phase 4: Set cover image (first article image) ──
+    // ── Phase 4: Set cover image (always from ORIGINAL article content) ──
     let setCover = false;
-    if (images.length > 0) {
-      const coverPath = images[0].localPath || images[0].tempPath;
+    const allOrigImages = options.removeCoverImg
+      ? parseSegments(article.content, article.filePath).images
+      : images;
+    const coverImg = allOrigImages[0];
+    if (coverImg) {
+      console.log(chalk.gray('   ℹ 正在处理封面图片...'));
+      // Download cover image if remote and not already downloaded
+      let coverPath = coverImg.localPath || coverImg.tempPath;
+      if (!coverPath && coverImg.src && /^https?:\/\//.test(coverImg.src)) {
+        if (!tempDir) tempDir = await mkdtemp(join(tmpdir(), 'x-article-'));
+        coverPath = await downloadToTemp(coverImg.src, tempDir);
+      }
       if (coverPath) {
         try {
           const coverInput = page.locator('[data-testid="fileInput"]');
           if (await coverInput.count() > 0) {
             await coverInput.setInputFiles(coverPath);
             await page.waitForTimeout(2000);
+            // Click "应用" to apply cover
+            if (options.autoCover !== false) {
+              try {
+                await page.locator('[data-testid="applyButton"]').click({ timeout: 5000 });
+                await page.waitForTimeout(1000);
+              } catch {}
+            }
             setCover = true;
             console.log(chalk.green('   ✓ 已设置封面图片'));
           }
