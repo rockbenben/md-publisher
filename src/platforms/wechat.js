@@ -22,7 +22,7 @@ export async function publish(article, options = {}) {
     // ============================================================
     // Stage 1: Convert markdown via doocs/md → clipboard gets rich HTML
     // ============================================================
-    console.log(chalk.gray('   Stage 1: 通过 md.doocs.org 转换文章格式...'));
+    console.log(chalk.gray('   ℹ 阶段一：通过 md.doocs.org 转换格式...'));
 
     converterPage = await openPage(config.converterUrl);
 
@@ -60,7 +60,7 @@ export async function publish(article, options = {}) {
     // ============================================================
     // Stage 2: Open WeChat MP editor, paste clipboard content
     // ============================================================
-    console.log(chalk.gray('   Stage 2: 打开公众号编辑器...'));
+    console.log(chalk.gray('   ℹ 阶段二：打开公众号编辑器...'));
 
     wechatPage = await openPage(config.url);
     await ensureLoggedIn(wechatPage, config);
@@ -167,7 +167,7 @@ export async function publish(article, options = {}) {
     const categories = article.meta.category?.length ? article.meta.category : options.category;
     const tags = article.meta.tag?.length ? article.meta.tag : options.tag;
     if (filledContent && (categories?.length || tags?.length)) {
-      console.log(chalk.gray(`   ℹ ${config.name} 暂不支持自动填写分类/标签`));
+      console.log(chalk.gray('   ℹ 分类/标签请手动设置'));
     }
 
     // Converter no longer needed — close it, keep editor open for user review
@@ -175,7 +175,7 @@ export async function publish(article, options = {}) {
     converterPage = null; // Prevent double-close in finally
 
     const parts = [filledTitle && '标题', filledContent && '内容'].filter(Boolean);
-    const message = parts.length ? `已填充${parts.join('和')}` : '未能自动填充，请手动操作';
+    const message = parts.length ? `已填充${parts.join('、')}` : '未能自动填充，请手动操作';
     return { success: filledContent, platform: config.name, message };
   } catch (err) {
     // On error: close both pages (converter handled by finally)
