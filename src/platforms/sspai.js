@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 import { PLATFORMS } from '../config.js';
-import { withPage, ensureLoggedIn, pasteText, findElement, MOD } from '../browser.js';
+import { withPage, ensureLoggedIn, pasteText, findElement, fillTitle } from '../browser.js';
 import { preprocessCallouts, prepareCoverImage, injectCoverToInput, stripFirstImage } from '../parser.js';
 
 const config = PLATFORMS.sspai;
@@ -25,21 +25,10 @@ export async function publish(article, options = {}) {
   return withPage(config.url, async (page) => {
     await ensureLoggedIn(page, config);
 
-    let filledTitle = false;
     let filledContent = false;
 
     // Step 1: Fill title
-    const titleEl = await findElement(page, ['input[placeholder*="请输入标题"]', 'textarea[placeholder*="标题"]', '[placeholder*="标题"]']);
-    if (titleEl) {
-      await page.click(titleEl.selector);
-      await page.waitForTimeout(200);
-      await page.keyboard.press(`${MOD}+A`);
-      await page.keyboard.type(article.meta.title);
-      console.log(chalk.green('   ✓ 已填写标题'));
-      filledTitle = true;
-    } else {
-      console.log(chalk.yellow('   ⚠ 未找到标题输入框，请手动填写'));
-    }
+    const filledTitle = await fillTitle(page, ['input[placeholder*="请输入标题"]', 'textarea[placeholder*="标题"]', '[placeholder*="标题"]'], article.meta.title);
 
     // Prepare cover early (extract URL from original content before any stripping)
     const coverB64 = await prepareCoverImage(page, article).catch(() => null);

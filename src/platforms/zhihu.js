@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 import { PLATFORMS } from '../config.js';
-import { withPage, ensureLoggedIn, pasteText, findElement, MOD } from '../browser.js';
+import { withPage, ensureLoggedIn, pasteText, findElement, fillTitle } from '../browser.js';
 import { preprocessCallouts, prepareCoverImage, injectCoverToInput, stripFirstImage } from '../parser.js';
 
 const config = PLATFORMS.zhihu;
@@ -56,21 +56,10 @@ export async function publish(article, options = {}) {
     if (options.removeCoverImg && coverB64) content = stripFirstImage(content);
     const transformed = transformContent(preprocessCallouts(content));
 
-    let filledTitle = false;
     let filledContent = false;
 
     // Step 1: Fill title
-    const titleEl = await findElement(page, ['textarea[placeholder*="标题"]', 'input[placeholder*="标题"]', '[placeholder*="请输入标题"]']);
-    if (titleEl) {
-      await page.click(titleEl.selector);
-      await page.waitForTimeout(200);
-      await page.keyboard.press(`${MOD}+A`);
-      await page.keyboard.type(article.meta.title);
-      console.log(chalk.green('   ✓ 已填写标题'));
-      filledTitle = true;
-    } else {
-      console.log(chalk.yellow('   ⚠ 未找到标题输入框，请手动填写'));
-    }
+    const filledTitle = await fillTitle(page, ['textarea[placeholder*="标题"]', 'input[placeholder*="标题"]', '[placeholder*="请输入标题"]'], article.meta.title);
 
     // Step 2: Paste content — start locator click BEFORE paste to catch the notification
     const editorEl = await findElement(page, ['.public-DraftEditor-content', '[contenteditable="true"]', '.ProseMirror', 'div[role="textbox"]']);

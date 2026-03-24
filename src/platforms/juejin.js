@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 import { PLATFORMS } from '../config.js';
-import { withPage, ensureLoggedIn, pasteText, pasteToFocused, findElement, MOD } from '../browser.js';
+import { withPage, ensureLoggedIn, pasteText, pasteToFocused, findElement, fillTitle } from '../browser.js';
 import { preprocessCallouts } from '../parser.js';
 
 const config = PLATFORMS.juejin;
@@ -14,20 +14,10 @@ export async function publish(article, options = {}) {
   return withPage(config.url, async (page) => {
     await ensureLoggedIn(page, config);
 
-    let filledTitle = false;
     let filledContent = false;
 
     // Fill title — wait for element to confirm editor loaded
-    const titleEl = await findElement(page, ['.title-input input', 'input[placeholder*="标题"]', '.byte-md-editor input']);
-    if (titleEl) {
-      await page.click(titleEl.selector);
-      await page.keyboard.press(`${MOD}+A`);
-      await page.keyboard.type(article.meta.title);
-      console.log(chalk.green('   ✓ 已填写标题'));
-      filledTitle = true;
-    } else {
-      console.log(chalk.yellow('   ⚠ 未找到标题输入框，请手动填写'));
-    }
+    const filledTitle = await fillTitle(page, ['.title-input input', 'input[placeholder*="标题"]', '.byte-md-editor input'], article.meta.title);
 
     // Paste markdown into editor
     const contentWithCallouts = preprocessCallouts(article.content);

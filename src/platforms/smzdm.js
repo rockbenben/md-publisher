@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import { marked } from 'marked';
 import { PLATFORMS } from '../config.js';
-import { withPage, ensureLoggedIn, pasteHtml, findElement, MOD } from '../browser.js';
+import { withPage, ensureLoggedIn, pasteHtml, findElement, fillTitle } from '../browser.js';
 import { preprocessCallouts } from '../parser.js';
 
 const config = PLATFORMS.smzdm;
@@ -32,21 +32,10 @@ export async function publish(article, options = {}) {
       console.log(chalk.yellow('   ⚠ 导航到编辑页超时，继续尝试...'));
     }
 
-    let filledTitle = false;
     let filledContent = false;
 
     // Step 2: Fill title — wait for element to confirm editor loaded
-    const titleEl = await findElement(page, ['input[placeholder*="请输入文章标题"]', 'input[placeholder*="标题"]', '[placeholder*="标题"]']);
-    if (titleEl) {
-      await page.click(titleEl.selector);
-      await page.waitForTimeout(200);
-      await page.keyboard.press(`${MOD}+A`);
-      await page.keyboard.type(article.meta.title);
-      console.log(chalk.green('   ✓ 已填写标题'));
-      filledTitle = true;
-    } else {
-      console.log(chalk.yellow('   ⚠ 未找到标题输入框，请手动填写'));
-    }
+    const filledTitle = await fillTitle(page, ['input[placeholder*="请输入文章标题"]', 'input[placeholder*="标题"]', '[placeholder*="标题"]'], article.meta.title);
 
     // Step 3: Convert markdown to HTML, paste as rich text into ProseMirror
     const html = marked(preprocessCallouts(article.content));

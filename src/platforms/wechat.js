@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 import { PLATFORMS } from '../config.js';
-import { openPage, getContext, ensureLoggedIn, alertUser, findElement, waitForEnter, MOD } from '../browser.js';
+import { openPage, getContext, ensureLoggedIn, alertUser, findElement, fillTitle, waitForEnter, MOD } from '../browser.js';
 
 const config = PLATFORMS.wechat;
 
@@ -99,9 +99,9 @@ export async function publish(article, options = {}) {
             if (newPage) {
               await newPage.waitForLoadState('domcontentloaded');
               editorPage = newPage;
+              console.log(chalk.green('   ✓ 已进入图文消息编辑页'));
+              enteredEditor = true;
             }
-            console.log(chalk.green('   ✓ 已进入图文消息编辑页'));
-            enteredEditor = true;
           }
         }
       } catch { /* click-through failed */ }
@@ -117,21 +117,10 @@ export async function publish(article, options = {}) {
       editorPage = pages[pages.length - 1];
     }
 
-    let filledTitle = false;
     let filledContent = false;
 
     // --- Fill title (also serves as page-ready signal) ---
-    const titleEl = await findElement(editorPage, ['#title', 'span[data-placeholder="标题"]', '[contenteditable="true"][data-placeholder*="标题"]', 'input[placeholder*="标题"]', 'textarea[placeholder*="标题"]', '.title-editor [contenteditable]'], 15000);
-    if (titleEl) {
-      await editorPage.click(titleEl.selector);
-      await editorPage.waitForTimeout(150);
-      await editorPage.keyboard.press(`${MOD}+A`);
-      await editorPage.keyboard.type(article.meta.title);
-      console.log(chalk.green('   ✓ 已填写标题'));
-      filledTitle = true;
-    } else {
-      console.log(chalk.yellow('   ⚠ 未找到标题输入框，请手动填写'));
-    }
+    const filledTitle = await fillTitle(editorPage, ['#title', 'span[data-placeholder="标题"]', '[contenteditable="true"][data-placeholder*="标题"]', 'input[placeholder*="标题"]', 'textarea[placeholder*="标题"]', '.title-editor [contenteditable]'], article.meta.title, 15000);
 
     // --- Paste rich HTML into editor via Ctrl+V ---
     // WeChat MP now uses ProseMirror (not iframe UEditor).
