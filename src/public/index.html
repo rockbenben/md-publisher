@@ -870,6 +870,7 @@
     // --- File picker (File System Access API with <input> fallback) ---
     const ARTICLE_EXTS = ['.md', '.markdown', '.mdown', '.mkd', '.mkdn', '.mdwn', '.mdx', '.txt'];
     const SKIP_FILES = new Set(['readme.md', 'changelog.md', 'license.md', 'license.txt']);
+    const SKIP_DIRS = new Set(['node_modules', 'user-data', '.git', '.vscode']);
 
     async function pickFiles() {
       // Try native File System Access API first (Chrome/Edge)
@@ -903,21 +904,31 @@
       window.addEventListener('focus', () => { if (input.parentNode) input.remove(); }, { once: true });
     }
 
+    /** Recursively collect article files from a FileSystemDirectoryHandle. */
+    async function collectArticleFiles(dirHandle) {
+      const files = [];
+      for await (const entry of dirHandle.values()) {
+        if (entry.name.startsWith('.')) continue;
+        if (entry.kind === 'file') {
+          const nameLower = entry.name.toLowerCase();
+          if (SKIP_FILES.has(nameLower)) continue;
+          const dot = entry.name.lastIndexOf('.');
+          if (dot >= 0 && ARTICLE_EXTS.includes(nameLower.substring(dot))) {
+            files.push(await entry.getFile());
+          }
+        } else if (entry.kind === 'directory' && !SKIP_DIRS.has(entry.name)) {
+          files.push(...await collectArticleFiles(entry));
+        }
+      }
+      return files;
+    }
+
     async function pickFolder() {
       // Try native File System Access API first (Chrome/Edge)
       if (window.showDirectoryPicker) {
         try {
           const dirHandle = await window.showDirectoryPicker();
-          const files = [];
-          for await (const entry of dirHandle.values()) {
-            if (entry.kind !== 'file' || entry.name.startsWith('.')) continue;
-            const nameLower = entry.name.toLowerCase();
-            if (SKIP_FILES.has(nameLower)) continue;
-            const dot = entry.name.lastIndexOf('.');
-            if (dot >= 0 && ARTICLE_EXTS.includes(nameLower.substring(dot))) {
-              files.push(await entry.getFile());
-            }
-          }
+          const files = await collectArticleFiles(dirHandle);
           if (!files.length) { showToast('该目录下没有找到文章文件', 'error'); return; }
           await uploadPickedFiles(files);
           return;
@@ -935,6 +946,9 @@
         const all = Array.from(input.files);
         const filtered = all.filter(f => {
           if (f.name.startsWith('.')) return false;
+          // Skip files inside hidden or excluded directories
+          const parts = (f.webkitRelativePath || '').split('/');
+          if (parts.slice(0, -1).some(p => p.startsWith('.') || SKIP_DIRS.has(p))) return false;
           const nameLower = f.name.toLowerCase();
           if (SKIP_FILES.has(nameLower)) return false;
           const dot = f.name.lastIndexOf('.');
