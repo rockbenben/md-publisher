@@ -333,3 +333,21 @@ export async function findElement(page, selectors, timeout = TIMEOUTS.selector) 
     return null;
   }
 }
+
+/**
+ * Find a title input by selectors, clear it, and type the given title.
+ * @returns {Promise<boolean>} true if title was filled
+ */
+export async function fillTitle(page, selectors, title, timeout) {
+  const el = await findElement(page, selectors, timeout);
+  if (el) {
+    await page.click(el.selector);
+    await page.waitForTimeout(200);
+    await page.keyboard.press(`${MOD}+A`);
+    await page.keyboard.type(title);
+    console.log(chalk.green('   ✓ 已填写标题'));
+    return true;
+  }
+  console.log(chalk.yellow('   ⚠ 未找到标题输入框，请手动填写'));
+  return false;
+}
