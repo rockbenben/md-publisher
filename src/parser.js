@@ -219,8 +219,14 @@ export async function scanArticleDirAsync(dirPath, { recursive = false } = {}) {
 
   files.sort((a, b) => b.mtimeMs - a.mtimeMs);
 
-  // Parse files in parallel for better throughput
-  const results = await Promise.allSettled(files.map(({ path: f }) => parseArticleAsync(f)));
+  // Parse files with bounded concurrency to avoid exhausting file handles
+  const CONCURRENCY = 16;
+  const results = [];
+  for (let i = 0; i < files.length; i += CONCURRENCY) {
+    const batch = files.slice(i, i + CONCURRENCY);
+    const batchResults = await Promise.allSettled(batch.map(({ path: f }) => parseArticleAsync(f)));
+    results.push(...batchResults);
+  }
   const articles = [];
   for (let i = 0; i < results.length; i++) {
     if (results[i].status === 'fulfilled') {
@@ -285,7 +291,9 @@ export async function prepareCoverImage(page, article, { acceptWebp = false, max
         } else {
           article._coverRaw = await readFile(resolve(dirname(article.filePath), src));
         }
-      } catch {}
+      } catch (err) {
+        console.warn(`⚠ 封面图下载失败: ${imgSrc} — ${err.message}`);
+      }
     }
   }
   if (!article._coverRaw) return null;
