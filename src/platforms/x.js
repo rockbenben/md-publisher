@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import chalk from 'chalk';
 import { marked } from 'marked';
 import { PLATFORMS, TIMEOUTS } from '../config.js';
-import { withPage, ensureLoggedIn, pasteHtml, findElement, MOD } from '../browser.js';
+import { withPage, ensureLoggedIn, pasteHtml, findElement, fillTitle } from '../browser.js';
 import { preprocessCallouts, stripFirstImage } from '../parser.js';
 
 const config = PLATFORMS.x;
@@ -327,6 +327,12 @@ async function replaceMarkers(page, codeBlocks) {
         imgIdx++;
       }
 
+      // Skip state rebuild if nothing was actually moved — avoids
+      // overwriting a still-settling paste with stale blocks
+      if (movedImages === 0 && movedCode === 0) {
+        return { ok: true, movedImages: 0, movedCode: 0 };
+      }
+
       const newCs = ContentState.createFromBlockArray(newBlocks, cs.getEntityMap());
       const newEs = EditorState.push(es, newCs, 'insert-fragment');
       onChange(newEs);
@@ -344,10 +350,6 @@ export async function publish(article, options = {}) {
   console.log(chalk.blue(`\n📝 正在发布到 ${config.name}...`));
 
   return withPage(config.url, async (page) => {
-    // ── Auto-reload once after 2s to avoid X's frequent blank page issue ──
-    await page.waitForTimeout(2000);
-    await page.goto(config.url).catch(() => {});
-
     await ensureLoggedIn(page, config);
 
     // ── Navigate to editor ──
@@ -370,26 +372,15 @@ export async function publish(article, options = {}) {
       console.log(chalk.yellow('   ⚠ 未找到撰写按钮'));
     }
 
-    let filledTitle = false;
     let filledContent = false;
     let insertedImages = 0;
     let failedSegments = 0;
 
     // ── Fill title ──
-    const titleEl = await findElement(page, [
+    const filledTitle = await fillTitle(page, [
       'textarea[placeholder*="标题"]',
       'textarea[placeholder*="Title" i]',
-    ]);
-    if (titleEl) {
-      await page.click(titleEl.selector);
-      await page.waitForTimeout(200);
-      await page.keyboard.press(`${MOD}+A`);
-      await page.keyboard.type(article.meta.title);
-      console.log(chalk.green('   ✓ 已填写标题'));
-      filledTitle = true;
-    } else {
-      console.log(chalk.yellow('   ⚠ 未找到标题输入框'));
-    }
+    ], article.meta.title);
 
     // ── Parse content ──
     // If removeCoverImg, strip first image from content (it's used as cover via Phase 4)
@@ -401,6 +392,7 @@ export async function publish(article, options = {}) {
     // ── Download remote images (parallel) ──
     let tempDir = null;
     const tempFiles = [];
+    try {
     const remoteImages = images.filter(img => !img.localPath);
     if (remoteImages.length > 0) {
       tempDir = await mkdtemp(join(tmpdir(), 'x-article-'));
@@ -483,6 +475,11 @@ export async function publish(article, options = {}) {
     }
 
     // ── Phase 3: Replace markers — move images + create code blocks ──
+    // When no images were uploaded, DraftJS needs extra time to process paste
+    // (image uploads naturally provide this delay via upload + 3s wait)
+    if (insertedImages === 0 && codeBlocks.length > 0) {
+      await page.waitForTimeout(2000);
+    }
     if (insertedImages > 0 || codeBlocks.length > 0) {
       const result = await replaceMarkers(page, codeBlocks);
       if (result.ok) {
@@ -531,11 +528,6 @@ export async function publish(article, options = {}) {
       }
     }
 
-    // ── Cleanup temp files ──
-    for (const f of tempFiles) {
-      try { await unlink(f); } catch {}
-    }
-
     const parts = [
       filledTitle && '标题',
       filledContent && '内容',
@@ -546,5 +538,10 @@ export async function publish(article, options = {}) {
     const failNote = failedSegments > 0 ? `（${failedSegments} 项失败）` : '';
     const message = parts.length ? `已填充${parts.join('、')}${failNote}` : '未能自动填充';
     return { success: parts.length > 0, platform: config.name, message };
+    } finally {
+      for (const f of tempFiles) {
+        try { await unlink(f); } catch {}
+      }
+    }
   });
 }
