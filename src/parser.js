@@ -39,9 +39,16 @@ export function parseArticleString(raw, filePath) {
   // Ensure scalar values — YAML can produce objects/arrays for fields we expect as strings
   const str = (v) => (typeof v === 'string' || typeof v === 'number') ? String(v) : '';
 
+  // If no frontmatter title, extract from first H1 heading
+  let title = str(data.title);
+  if (!title) {
+    const h1Match = content.match(/^#\s+(.+)$/m);
+    if (h1Match) title = h1Match[1].trim();
+  }
+
   return {
     meta: {
-      title: str(data.title),
+      title,
       shortTitle: str(data.shortTitle),
       description: str(data.description),
       date: data.date instanceof Date ? data.date.toISOString().slice(0, 10) : str(data.date),
