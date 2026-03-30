@@ -327,6 +327,21 @@
     .platform-chip.selected { border-color: var(--accent); background: rgba(99, 102, 241, 0.08); }
     .platform-chip input { accent-color: var(--accent); cursor: pointer; }
 
+    .platform-open {
+      color: var(--text2);
+      opacity: 0;
+      font-size: 13px;
+      padding: 4px 6px;
+      margin: -4px -6px;
+      cursor: pointer;
+      transition: opacity 0.15s, color 0.15s;
+      flex-shrink: 0;
+      line-height: 1;
+      border-radius: 4px;
+    }
+    .platform-chip:hover .platform-open { opacity: 0.6; }
+    .platform-open:hover { opacity: 1 !important; color: var(--accent) !important; }
+
     .platform-status { margin-left: auto; font-size: 12px; }
 
     .platform-chip > span:first-of-type {
@@ -628,10 +643,10 @@
       <button class="btn-secondary" onclick="closeBrowser()" title="关闭自动化浏览器窗口，释放资源（不影响本页面）">关闭浏览器</button>
       <span class="publish-count" id="publishCount"></span>
       <span style="margin-left:auto;display:flex;align-items:center;gap:12px">
-        <label style="display:flex;align-items:center;gap:4px;font-size:13px;color:var(--text-secondary);cursor:pointer;user-select:none">
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;color:var(--text2);cursor:pointer;user-select:none">
           <input type="checkbox" id="autoCoverCheck" checked onchange="saveCoverSettings()"> 封面自动确认
         </label>
-        <label style="display:flex;align-items:center;gap:4px;font-size:13px;color:var(--text-secondary);cursor:pointer;user-select:none" title="首图已作为封面使用，避免正文重复显示">
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;color:var(--text2);cursor:pointer;user-select:none" title="首图已作为封面使用，避免正文重复显示">
           <input type="checkbox" id="removeCoverImgCheck" checked onchange="saveCoverSettings()"> 正文去除首图
         </label>
       </span>
@@ -1289,6 +1304,7 @@
           ${iconHtml}
           <span title="${esc(p.name)}">${esc(p.name)}</span>
           ${loginHtml}
+          <span class="platform-open" title="在浏览器中打开" onclick="event.stopPropagation();openPlatform('${p.id}')">&#8599;</span>
           <span class="platform-status" id="ps-${p.id}"></span>
         </div>`;
       }).join('');
@@ -1353,6 +1369,22 @@
     }
 
     let _platformSaveTimer = null;
+    async function openPlatform(id) {
+      try {
+        const res = await fetch('/api/open-platform', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ platform: id }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || `HTTP ${res.status}`);
+        }
+      } catch (err) {
+        showToast('打开平台失败: ' + err.message, 'error');
+      }
+    }
+
     function togglePlatform(id) {
       if (selectedPlatforms.has(id)) selectedPlatforms.delete(id);
       else selectedPlatforms.add(id);

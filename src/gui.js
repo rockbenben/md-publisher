@@ -14,7 +14,7 @@ import { readdir, mkdir, writeFile, unlink, stat as fsStat, access as fsAccess }
 import { execFile } from 'node:child_process';
 import { PLATFORMS } from './config.js';
 import { parseArticleString, scanArticleDirAsync, parseArticleAsync, ARTICLE_EXTS, loadProjectConfigAsync } from './parser.js';
-import { closeContext, setGuiMode, getContext } from './browser.js';
+import { closeContext, setGuiMode, getContext, openPage } from './browser.js';
 
 // GUI mode — skip terminal waitForEnter, let user interact via browser
 setGuiMode(true);
@@ -236,6 +236,7 @@ app.get('/api/platforms', (req, res) => {
     id: key,
     name: p.name,
     icon: p.icon || '',
+    url: p.url || '',
   }));
   res.json(platforms);
 });
@@ -591,6 +592,20 @@ app.post('/api/close-browser', asyncHandler(async (req, res) => {
   try {
     keptOpenPages = [];
     await closeContext();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}));
+
+// POST /api/open-platform — open a platform in the Playwright browser
+app.post('/api/open-platform', asyncHandler(async (req, res) => {
+  const { platform } = req.body || {};
+  const cfg = PLATFORMS[platform];
+  if (!cfg) return res.status(400).json({ error: '未知平台' });
+  const url = cfg.checkUrl || cfg.url;
+  try {
+    await openPage(url);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
