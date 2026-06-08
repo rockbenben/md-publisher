@@ -2,6 +2,7 @@ import { readFileSync, readdirSync, statSync, existsSync } from 'fs';
 import { readdir, stat, readFile, access } from 'fs/promises';
 import { join, extname, basename, resolve, dirname } from 'path';
 import matter from 'gray-matter';
+import yaml from 'js-yaml';
 import { PLATFORMS } from './config.js';
 
 /** Supported article file extensions */
@@ -73,12 +74,14 @@ export function scanArticleDir(dirPath, { recursive = false } = {}) {
   const files = []; // { path, mtimeMs }
 
   function scan(dir) {
-    const entries = readdirSync(dir);
+    let entries;
+    try { entries = readdirSync(dir); } catch { return; }
     for (const entry of entries) {
       if (entry.startsWith('.') || SKIP_DIRS.has(entry)) continue;
 
       const fullPath = join(dir, entry);
-      const stat = statSync(fullPath);
+      let stat;
+      try { stat = statSync(fullPath); } catch { continue; } // dangling symlink, EPERM, EBUSY, etc.
 
       if (stat.isFile() && ARTICLE_EXTS.has(extname(entry).toLowerCase())) {
         if (SKIP_FILES.has(basename(entry).toLowerCase())) continue;
@@ -111,6 +114,25 @@ export function scanArticleDir(dirPath, { recursive = false } = {}) {
 
 const CONFIG_NAMES = ['.md-publisher.yml', '.md-publisher.yaml'];
 const validPlatformIds = new Set(Object.keys(PLATFORMS));
+
+/**
+ * Parse raw config file text into a data object.
+ * `.md-publisher.yml` is documented as plain YAML, but gray-matter only
+ * extracts data from `---`-fenced frontmatter (a plain YAML file yields {}).
+ * Support both forms: fenced → gray-matter, plain → js-yaml directly.
+ * @param {string} raw
+ * @returns {object} parsed data (never throws — returns {} on parse error)
+ */
+function parseConfigData(raw) {
+  const text = raw.replace(/^﻿/, ''); // strip BOM
+  try {
+    if (/^\s*---\r?\n/.test(text)) return matter(text).data || {};
+    const loaded = yaml.load(text);
+    return (loaded && typeof loaded === 'object') ? loaded : {};
+  } catch {
+    return {};
+  }
+}
 
 /**
  * Parse and validate a raw project config object.
@@ -160,8 +182,7 @@ export function loadProjectConfig(dirPath) {
     const fp = join(dirPath, name);
     if (existsSync(fp)) {
       try {
-        const { data } = matter(readFileSync(fp, 'utf-8'));
-        return parseProjectConfig(data);
+        return parseProjectConfig(parseConfigData(readFileSync(fp, 'utf-8')));
       } catch { return null; }
     }
   }
@@ -179,8 +200,7 @@ export async function loadProjectConfigAsync(dirPath) {
     try {
       await access(fp);
       const raw = await readFile(fp, 'utf-8');
-      const { data } = matter(raw);
-      return parseProjectConfig(data);
+      return parseProjectConfig(parseConfigData(raw));
     } catch { continue; }
   }
   return null;
@@ -345,16 +365,31 @@ export async function prepareCoverImage(page, article, { acceptWebp = false, max
  * @param {string} selector - CSS selector for the file input
  * @param {string} base64Data - base64 encoded image data
  */
+/**
+ * Pick the upload File MIME + name from a base64 image payload's magic prefix,
+ * so a raw PNG/WEBP/GIF isn't mislabeled as image/jpeg (strict upload
+ * validators reject the mismatch). Defaults to JPEG (covers Canvas output).
+ * @param {string} base64Data
+ * @returns {{ mime: string, name: string }}
+ */
+export function coverFileMeta(base64Data) {
+  if (base64Data.startsWith('iVBOR')) return { mime: 'image/png', name: 'cover.png' };
+  if (base64Data.startsWith('UklGR')) return { mime: 'image/webp', name: 'cover.webp' };
+  if (base64Data.startsWith('R0lG')) return { mime: 'image/gif', name: 'cover.gif' };
+  return { mime: 'image/jpeg', name: 'cover.jpg' };
+}
+
 export async function injectCoverToInput(page, selector, base64Data) {
-  await page.evaluate(({ data, selector }) => {
+  const meta = coverFileMeta(base64Data);
+  await page.evaluate(({ data, selector, mime, name }) => {
     const bin = atob(data);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    const file = new File([bytes], 'cover.jpg', { type: 'image/jpeg' });
+    const file = new File([bytes], name, { type: mime });
     const input = document.querySelector(selector);
     const dt = new DataTransfer();
     dt.items.add(file);
     input.files = dt.files;
     input.dispatchEvent(new Event('change', { bubbles: true }));
-  }, { data: base64Data, selector });
+  }, { data: base64Data, selector, mime: meta.mime, name: meta.name });
 }
