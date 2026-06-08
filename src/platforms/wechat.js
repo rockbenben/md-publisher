@@ -1,6 +1,7 @@
 import chalk from 'chalk';
 import { PLATFORMS } from '../config.js';
 import { openPage, getContext, ensureLoggedIn, alertUser, findElement, fillTitle, waitForEnter, MOD } from '../browser.js';
+import { preprocessCallouts } from '../parser.js';
 
 const config = PLATFORMS.wechat;
 
@@ -36,7 +37,7 @@ export async function publish(article, options = {}) {
       const clipOk = await converterPage.evaluate(async (text) => {
         try { await navigator.clipboard.writeText(text); return true; }
         catch { return false; }
-      }, article.content);
+      }, preprocessCallouts(article.content));
       if (!clipOk) throw new Error('剪贴板写入失败，请检查浏览器权限');
       await converterPage.keyboard.press(`${MOD}+V`);
       await converterPage.waitForTimeout(800);

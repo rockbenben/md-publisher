@@ -1,4 +1,4 @@
-import { writeFile, unlink, mkdtemp } from 'fs/promises';
+import { writeFile, rm, mkdtemp } from 'fs/promises';
 import { resolve, dirname, join } from 'path';
 import { tmpdir } from 'os';
 import chalk from 'chalk';
@@ -26,7 +26,7 @@ const MARKER_SUFFIX = '___\u200B';
  * Scans for the minimum heading level actually used (outside code blocks),
  * then remaps: minLevel → #, minLevel+1..6 → ##.
  */
-function normalizeHeadings(markdown) {
+export function normalizeHeadings(markdown) {
   const lines = markdown.split('\n');
   let inCode = false;
   let minLevel = 7;
@@ -53,7 +53,7 @@ function normalizeHeadings(markdown) {
 
 // ─── Markdown → segments (split at images AND code blocks) ──────────────────
 
-function parseSegments(markdown, filePath) {
+export function parseSegments(markdown, filePath) {
   markdown = preprocessCallouts(markdown);
   markdown = normalizeHeadings(markdown);
   const lines = markdown.split('\n');
@@ -235,8 +235,8 @@ async function insertImage(page, filePath) {
  * Reorder DraftJS blocks: move image atomic blocks from the end
  * to replace marker blocks at their correct positions.
  */
-async function replaceMarkers(page, codeBlocks) {
-  return await page.evaluate(({ codeBlocks, IMG_M, CODE_M, M_END }) => {
+async function replaceMarkers(page, codeBlocks, uploadedMarkers = []) {
+  return await page.evaluate(({ codeBlocks, uploadedMarkers, IMG_M, CODE_M, M_END }) => {
     try {
       const editorEl = document.querySelector('[data-testid="composer"]');
       if (!editorEl) return { ok: false, error: 'no editor' };
@@ -262,6 +262,7 @@ async function replaceMarkers(page, codeBlocks) {
 
       // Classify blocks
       const imgMarkers = new Set();
+      const imgMarkerNum = new Map(); // block index → image marker number (the n in ___IMG_n___)
       const codeMarkers = new Set();
       const mediaBlocks = [];
 
@@ -269,6 +270,8 @@ async function replaceMarkers(page, codeBlocks) {
         const text = block.getText();
         if (text.includes(IMG_M) && text.includes(M_END)) {
           imgMarkers.add(i);
+          const m = text.match(/___IMG_(\d+)___/);
+          imgMarkerNum.set(i, m ? Number(m[1]) : -1);
         } else if (text.includes(CODE_M) && text.includes(M_END)) {
           codeMarkers.add(i);
         } else if (block.getType() === 'atomic') {
@@ -301,19 +304,36 @@ async function replaceMarkers(page, codeBlocks) {
       // rotate so mediaBlocks[0] = first uploaded image
       if (mediaBlocks.length > 1) mediaBlocks.unshift(mediaBlocks.pop());
 
+      // Map each image marker NUMBER to its uploaded media block.
+      // mediaBlocks[k] (post-rotation) is the k-th successfully uploaded image,
+      // and uploadedMarkers[k] is that image's marker number. Markers whose
+      // image failed to upload have no entry here, so they are dropped below —
+      // this removes the leftover literal "___IMG_n___" text AND keeps the
+      // surviving images aligned to their correct markers (an ordinal walk
+      // would shift every image after a failed one).
+      const mediaCount = Math.min(mediaBlocks.length, uploadedMarkers.length);
+      const numToK = new Map();
+      for (let k = 0; k < mediaCount; k++) numToK.set(uploadedMarkers[k], k);
+
       // Build new block array
       const mediaSet = new Set(mediaBlocks.map(mb => mb.index));
       const newBlocks = [];
-      let imgIdx = 0;
+      const placedK = new Set();
       let codeIdx = 0;
       let movedImages = 0;
       let movedCode = 0;
+      let droppedImages = 0;
 
       for (let i = 0; i < blocks.length; i++) {
-        if (imgMarkers.has(i) && imgIdx < mediaBlocks.length) {
-          newBlocks.push(mediaBlocks[imgIdx].block);
-          imgIdx++;
-          movedImages++;
+        if (imgMarkers.has(i)) {
+          const k = numToK.get(imgMarkerNum.get(i));
+          if (k !== undefined) {
+            newBlocks.push(mediaBlocks[k].block);
+            placedK.add(k);
+            movedImages++;
+          } else {
+            droppedImages++; // failed/unmatched image → drop the marker block
+          }
         } else if (codeMarkers.has(i) && codeIdx < codeAtomics.length) {
           newBlocks.push(codeAtomics[codeIdx]);
           codeIdx++;
@@ -322,26 +342,28 @@ async function replaceMarkers(page, codeBlocks) {
           newBlocks.push(blocks[i]);
         }
       }
-      while (imgIdx < mediaBlocks.length) {
-        newBlocks.push(mediaBlocks[imgIdx].block);
-        imgIdx++;
+      // Safety net: append any uploaded media not placed at a marker (count
+      // mismatch or a marker whose text didn't survive) so no image is lost.
+      for (let k = 0; k < mediaBlocks.length; k++) {
+        if (!placedK.has(k)) { newBlocks.push(mediaBlocks[k].block); movedImages++; }
       }
 
-      // Skip state rebuild if nothing was actually moved — avoids
-      // overwriting a still-settling paste with stale blocks
-      if (movedImages === 0 && movedCode === 0) {
-        return { ok: true, movedImages: 0, movedCode: 0 };
+      // Skip state rebuild only if there is genuinely nothing to do — avoids
+      // overwriting a still-settling paste with stale blocks. A dropped marker
+      // is a real change, so don't early-return when droppedImages > 0.
+      if (movedImages === 0 && movedCode === 0 && droppedImages === 0) {
+        return { ok: true, movedImages: 0, movedCode: 0, droppedImages: 0 };
       }
 
       const newCs = ContentState.createFromBlockArray(newBlocks, cs.getEntityMap());
       const newEs = EditorState.push(es, newCs, 'insert-fragment');
       onChange(newEs);
 
-      return { ok: true, movedImages, movedCode };
+      return { ok: true, movedImages, movedCode, droppedImages };
     } catch (err) {
       return { ok: false, error: err.message };
     }
-  }, { codeBlocks, IMG_M: IMG_MARKER_PREFIX, CODE_M: CODE_MARKER_PREFIX, M_END: MARKER_SUFFIX });
+  }, { codeBlocks, uploadedMarkers, IMG_M: IMG_MARKER_PREFIX, CODE_M: CODE_MARKER_PREFIX, M_END: MARKER_SUFFIX });
 }
 
 // ─── Main Publish Flow ──────────────────────────────────────────────────────
@@ -440,7 +462,12 @@ export async function publish(article, options = {}) {
     console.log(chalk.green('   ✓ 已粘贴文章内容'));
 
     // ── Phase 2: Upload all images via dialog (they append at the end) ──
-    for (const img of images) {
+    // images[mi] corresponds to image marker number mi (same document order).
+    // Record the marker numbers that actually produced a media block, in upload
+    // order, so Phase 3 can align them and drop the markers of failed images.
+    const uploadedMarkers = [];
+    for (let mi = 0; mi < images.length; mi++) {
+      const img = images[mi];
       const imgPath = img.localPath || img.tempPath;
       if (!imgPath) {
         console.log(chalk.yellow(`   ⚠ 跳过图片: ${img.src}`));
@@ -451,6 +478,7 @@ export async function publish(article, options = {}) {
       try {
         await insertImage(page, imgPath);
         insertedImages++;
+        uploadedMarkers.push(mi);
         console.log(chalk.green(`   ✓ 已上传图片 (${insertedImages}/${images.length}): ${img.alt || img.src.substring(0, 40)}`));
       } catch (err) {
         failedSegments++;
@@ -474,19 +502,22 @@ export async function publish(article, options = {}) {
       await page.waitForTimeout(3000);
     }
 
-    // ── Phase 3: Replace markers — move images + create code blocks ──
-    // When no images were uploaded, DraftJS needs extra time to process paste
-    // (image uploads naturally provide this delay via upload + 3s wait)
-    if (insertedImages === 0 && codeBlocks.length > 0) {
+    // ── Phase 3: Replace markers — move images + create code blocks, and
+    //    drop the markers of any images that failed to upload ──
+    // When no images were uploaded, DraftJS needs extra time to process the
+    // paste (image uploads naturally provide this delay via upload + 3s wait).
+    if (insertedImages === 0 && (codeBlocks.length > 0 || images.length > 0)) {
       await page.waitForTimeout(2000);
     }
-    if (insertedImages > 0 || codeBlocks.length > 0) {
-      const result = await replaceMarkers(page, codeBlocks);
+    // Run whenever there is anything to place OR a leftover marker to clean up.
+    if (insertedImages > 0 || codeBlocks.length > 0 || images.length > 0) {
+      const result = await replaceMarkers(page, codeBlocks, uploadedMarkers);
       if (result.ok) {
         const moved = [];
         if (result.movedImages > 0) moved.push(`${result.movedImages} 张图片`);
         if (result.movedCode > 0) moved.push(`${result.movedCode} 个代码块`);
-        console.log(chalk.green(`   ✓ 已定位 ${moved.join(' + ')}`));
+        if (result.droppedImages > 0) moved.push(`清理 ${result.droppedImages} 个失败图片占位`);
+        if (moved.length) console.log(chalk.green(`   ✓ 已定位 ${moved.join(' + ')}`));
       } else {
         console.log(chalk.yellow(`   ⚠ 内容定位失败: ${result.error}`));
       }
@@ -539,9 +570,10 @@ export async function publish(article, options = {}) {
     const message = parts.length ? `已填充${parts.join('、')}${failNote}` : '未能自动填充';
     return { success: parts.length > 0, platform: config.name, message };
     } finally {
-      for (const f of tempFiles) {
-        try { await unlink(f); } catch {}
-      }
+      // Remove the whole temp dir (and everything in it) — covers both the
+      // images downloaded in Phase 0 and the Phase-4 cover image, which was
+      // written here but never tracked in tempFiles.
+      if (tempDir) { try { await rm(tempDir, { recursive: true, force: true }); } catch {} }
     }
   });
 }

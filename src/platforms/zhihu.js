@@ -10,7 +10,7 @@ const config = PLATFORMS.zhihu;
  * Zhihu's markdown parser doesn't handle blank lines around ![...](...)
  * properly — they cause layout issues after conversion.
  */
-function transformContent(content) {
+export function transformContent(content) {
   const lines = content.split('\n');
   const isImage = lines.map(l => /^\s*!\[/.test(l));
   const result = [];

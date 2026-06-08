@@ -8,7 +8,7 @@ const config = PLATFORMS.sspai;
 /**
  * Transform content for 少数派: remove image optimization params.
  */
-function transformContent(content) {
+export function transformContent(content) {
   return preprocessCallouts(content).replace(/\?imageMogr2\/format\/webp/g, '');
 }
 
