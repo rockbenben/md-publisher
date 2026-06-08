@@ -7,7 +7,7 @@ if (major < 18) {
 }
 
 import express from 'express';
-import { resolve, dirname, basename, extname, sep } from 'path';
+import { resolve, dirname, basename, extname } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync, readFileSync } from 'fs';
 import { readdir, mkdir, writeFile, unlink, stat as fsStat, access as fsAccess } from 'fs/promises';
@@ -15,6 +15,7 @@ import { execFile } from 'node:child_process';
 import { PLATFORMS } from './config.js';
 import { parseArticleString, scanArticleDirAsync, parseArticleAsync, ARTICLE_EXTS, loadProjectConfigAsync } from './parser.js';
 import { closeContext, setGuiMode, getContext, openPage } from './browser.js';
+import { isPathWithin, stripAnsi, safeStringify, sanitizeSettings, orderedValidPlatforms, sanitizeUploadFileName } from './gui-utils.js';
 
 // GUI mode — skip terminal waitForEnter, let user interact via browser
 setGuiMode(true);
@@ -27,22 +28,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // --- Settings persistence ---
 const SETTINGS_FILE = resolve(__dirname, '../settings.json');
 const UPLOAD_DIR = resolve(__dirname, '../.uploads');
-const PROJECT_ROOT = resolve(__dirname, '..');
 
 const DEFAULT_SETTINGS = { articleDir: '', defaultPlatforms: ['sspai', 'zhihu', 'wechat'] };
-
-/**
- * Validate that a resolved path does not escape a given root.
- * Used to prevent path-traversal attacks on API endpoints that accept user paths.
- * @param {string} absPath - Resolved absolute path
- * @param {string} root - Allowed root directory
- * @returns {boolean}
- */
-function isPathWithin(absPath, root) {
-  const normalised = resolve(absPath);
-  const normalRoot = resolve(root);
-  return normalised === normalRoot || normalised.startsWith(normalRoot + sep);
-}
 
 // Memory cache — avoids readFileSync on every request
 let _settingsCache = null;
@@ -118,19 +105,6 @@ function broadcast(event, data) {
 // Redirect console.log to also broadcast to SSE clients
 const origLog = console.log;
 const origError = console.error;
-
-function stripAnsi(str) {
-  // eslint-disable-next-line no-control-regex
-  return String(str)
-    .replace(/\u001b\[[0-9;]*[a-zA-Z]/g, '')  // SGR + cursor sequences: \e[...m, \e[...A, etc.
-    .replace(/\u001b\][^\x07]*\x07/g, '')       // OSC sequences: \e]0;title\x07
-    .replace(/[\x07]/g, '');                     // Stray BEL characters
-}
-
-function safeStringify(a) {
-  if (typeof a === 'string') return a;
-  try { return JSON.stringify(a); } catch { return String(a); }
-}
 
 console.log = (...args) => {
   origLog(...args);
@@ -247,23 +221,12 @@ app.get('/api/settings', (req, res) => {
 });
 
 // POST /api/settings — save settings (whitelist keys to prevent arbitrary data)
-const ALLOWED_SETTINGS_KEYS = new Set(['articleDir', 'defaultPlatforms', 'loginStatus']);
-
 app.post('/api/settings', asyncHandler(async (req, res) => {
   if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
     return res.status(400).json({ error: '无效的请求体' });
   }
   try {
-    const current = loadSettings();
-    for (const key of Object.keys(req.body)) {
-      if (!ALLOWED_SETTINGS_KEYS.has(key)) continue;
-      const val = req.body[key];
-      // Type-check each setting to prevent corrupt data
-      if (key === 'articleDir' && typeof val !== 'string') continue;
-      if (key === 'defaultPlatforms' && !Array.isArray(val)) continue;
-      if (key === 'loginStatus' && (typeof val !== 'object' || val === null || Array.isArray(val))) continue;
-      current[key] = val;
-    }
+    const current = sanitizeSettings(loadSettings(), req.body);
     await saveSettings(current);
     res.json(current);
   } catch (err) {
@@ -385,7 +348,7 @@ app.post('/api/articles/upload', asyncHandler(async (req, res) => {
         origLog(`⚠ 跳过过大或无效的文件: ${f.name}`);
         continue;
       }
-      const safeName = f.name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
+      const safeName = sanitizeUploadFileName(f.name);
       // Skip files with unsupported extensions
       if (!ARTICLE_EXTS.has(extname(safeName).toLowerCase())) {
         origLog(`⚠ 跳过不支持的文件类型: ${f.name}`);
@@ -532,17 +495,23 @@ app.post('/api/publish', asyncHandler(async (req, res) => {
     return res.status(400).json({ error: '请选择文章和平台' });
   }
 
+  // Reject malformed paths up front — a non-string here would later throw in
+  // basename() *after* the lock is taken, leaking isPublishing forever.
+  if (!Array.isArray(filePaths) || !filePaths.every(fp => typeof fp === 'string')) {
+    return res.status(400).json({ error: '文件路径无效' });
+  }
+
   // Validate and sort platform IDs to match config order
-  const platformOrder = Object.keys(PLATFORMS);
-  const validPlatformIds = platforms
-    .filter(id => id in PLATFORMS && id in platformPublishers)
-    .sort((a, b) => platformOrder.indexOf(a) - platformOrder.indexOf(b));
+  const validPlatformIds = orderedValidPlatforms(platforms, Object.keys(PLATFORMS), Object.keys(platformPublishers));
   if (validPlatformIds.length === 0) {
     return res.status(400).json({ error: '没有有效的平台' });
   }
 
-  // Lock BEFORE async parsing to prevent concurrent requests slipping through
+  // Lock BEFORE async parsing to prevent concurrent requests slipping through.
+  // Create the AbortController synchronously here too, so a cancel request that
+  // arrives during the parse window below can actually abort the task.
   isPublishing = true;
+  publishAbort = new AbortController();
   broadcast('status', { publishing: true });
 
   // Parse articles (async to avoid blocking event loop) — collect ALL errors before aborting
@@ -557,10 +526,20 @@ app.post('/api/publish', asyncHandler(async (req, res) => {
   }
   if (parseErrors.length > 0) {
     isPublishing = false;
+    publishAbort = null;
     const errMsg = `解析文件失败:\n${parseErrors.join('\n')}`;
     broadcast('status', { publishing: false });
     broadcast('app-error', { message: errMsg });
     return res.status(400).json({ error: errMsg });
+  }
+
+  // Cancelled while parsing — bail out before launching the publish task
+  if (publishAbort.signal.aborted) {
+    isPublishing = false;
+    publishAbort = null;
+    broadcast('cancelled', {});
+    broadcast('status', { publishing: false });
+    return res.json({ status: 'cancelled' });
   }
 
   // Respond immediately — actual publishing happens async
@@ -568,7 +547,6 @@ app.post('/api/publish', asyncHandler(async (req, res) => {
 
   // Run publishing in background — store promise as lock
   // publishArticles uses try/finally to guarantee isPublishing reset
-  publishAbort = new AbortController();
   publishTask = publishArticles(articles, validPlatformIds, { category, tag, autoCover: autoCover !== false, removeCoverImg: !!removeCoverImg }, publishAbort.signal).catch((err) => {
     broadcast('app-error', { message: err?.message || String(err) });
   }).finally(() => { publishTask = null; publishAbort = null; });
@@ -729,6 +707,11 @@ const lastLoginResults = {};
 
 // POST /api/check-login — trigger login status check (results streamed via SSE)
 app.post('/api/check-login', (req, res) => {
+  if (isPublishing) {
+    // Login check opens tabs in the shared browser context — block it during
+    // publish so it can't interfere with the running automation.
+    return res.status(409).json({ error: '发布进行中，无法检查登录' });
+  }
   if (isCheckingLogin) {
     return res.status(409).json({ error: '正在检查中' });
   }
