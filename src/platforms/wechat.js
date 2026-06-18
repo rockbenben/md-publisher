@@ -1,9 +1,95 @@
 import chalk from 'chalk';
+import { writeFile, unlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PLATFORMS } from '../config.js';
 import { openPage, getContext, ensureLoggedIn, alertUser, findElement, fillTitle, waitForEnter, MOD } from '../browser.js';
-import { preprocessCallouts } from '../parser.js';
+import { preprocessCallouts, prepareCoverImage, coverFileMeta, stripFirstImage } from '../parser.js';
 
 const config = PLATFORMS.wechat;
+
+/**
+ * Upload the article cover into WeChat's 图片库 and set it as the 封面.
+ *
+ * Verified live against the real appmsg editor (2026-06):
+ *   封面热区 → 从图片库选择 → 上传文件(webuploader) → 选中首图(此前「下一步」是灰的)
+ *   → 下一步 → 编辑封面(2.35:1 / 1:1) → 确认.
+ *
+ * Never throws — returns false on any failure so publishing still succeeds.
+ * @param {import('playwright').Page} page - editor page
+ * @param {string} coverB64 - base64 cover image (from prepareCoverImage)
+ * @returns {Promise<boolean>} true if the cover was set
+ */
+async function setWechatCover(page, coverB64, autoConfirm) {
+  let tmpPath = null;
+  try {
+    // Materialise the (already downloaded/normalised) cover to a temp file —
+    // WeChat's uploader is webuploader, which reliably accepts setInputFiles.
+    const ext = coverFileMeta(coverB64).name.split('.').pop();
+    tmpPath = join(tmpdir(), `md-pub-cover-${process.pid}-${ext}.${ext}`);
+    await writeFile(tmpPath, Buffer.from(coverB64, 'base64'));
+
+    // 1. Open the cover picker (从图片库选择). Clicking the cover hot-zone
+    //    surfaces the entry buttons; each click auto-waits for its target, so
+    //    no fixed sleeps are needed between these steps.
+    await page.locator('#js_cover_area .js_cover_btn_area').first().click();
+    await page.locator('#js_cover_area a.js_imagedialog:visible').first().click();
+    const dialog = page.locator('.weui-desktop-dialog:visible');
+    await dialog.waitFor({ state: 'visible', timeout: 8000 });
+
+    // 2. Inject the file into the (hidden) webuploader input. Wait for the
+    //    「上传文件」pick button to render first — that signals webuploader has
+    //    initialised and bound its change handler, so the injection is picked up.
+    await dialog.locator('.single_upload_btn_container').first().waitFor({ state: 'visible', timeout: 8000 });
+    await dialog.locator('input[type="file"]').first().setInputFiles(tmpPath);
+
+    // 3. Wait for the upload to land as the first thumbnail, then select it.
+    //    「下一步」stays disabled until a thumbnail is selected, so poll-click
+    //    the newest image until the button enables (skip if already enabled —
+    //    avoids deselecting an auto-selected upload).
+    const firstThumb = dialog.locator('.weui-desktop-img-picker__item').first();
+    await firstThumb.waitFor({ state: 'visible', timeout: 20000 });
+    const nextBtn = dialog.locator('button.weui-desktop-btn_primary', { hasText: '下一步' }).first();
+    let ready = false;
+    for (let i = 0; i < 15; i++) {
+      const disabled = await nextBtn.evaluate(b => /weui-desktop-btn_disabled/.test(b.className)).catch(() => true);
+      if (!disabled) { ready = true; break; }
+      await firstThumb.click().catch(() => {});
+      await page.waitForTimeout(600);
+    }
+    if (!ready) throw new Error('上传后「下一步」未激活（图片可能仍在上传）');
+
+    // 4. 下一步 → 编辑封面(裁剪). The 确认 (apply crop) is the manual-crop point,
+    //    so it's gated on autoConfirm — off ⇒ leave the crop dialog for the user.
+    await nextBtn.click({ timeout: 8000 });
+    const cropConfirm = dialog.locator('button.weui-desktop-btn_primary', { hasText: '确认' }).first();
+    await cropConfirm.waitFor({ state: 'visible', timeout: 8000 });
+    if (!autoConfirm) {
+      console.log(chalk.green('   ✓ 已上传封面，请在弹窗中手动裁切并确认'));
+      return true;
+    }
+    await cropConfirm.click({ timeout: 8000 });
+
+    // 5. Verify the cover actually landed. WeChat renders the preview's
+    //    background image asynchronously after the dialog closes, so poll
+    //    (up to ~6s) rather than guessing a single fixed wait.
+    const coverSet = () => page.evaluate(() => {
+      const p = document.querySelector('.js_cover_preview_new');
+      const bg = p && getComputedStyle(p).backgroundImage;
+      return !!(bg && bg !== 'none' && /https?:|mmbiz/.test(bg));
+    });
+    for (let i = 0; i < 12; i++) {
+      if (await coverSet()) { console.log(chalk.green('   ✓ 已设置封面')); return true; }
+      await page.waitForTimeout(500);
+    }
+    return false;
+  } catch (err) {
+    console.log(chalk.yellow(`   ⚠ 封面设置失败: ${err.message}`));
+    return false;
+  } finally {
+    if (tmpPath) await unlink(tmpPath).catch(() => {});
+  }
+}
 
 /**
  * 公众号 - Two-stage flow (manual page management, can't use withPage):
@@ -18,6 +104,7 @@ export async function publish(article, options = {}) {
   let converterPage = null;
   let wechatPage = null;
   let editorPage = null;
+  let coverB64 = null;
 
   try {
     // ============================================================
@@ -26,6 +113,13 @@ export async function publish(article, options = {}) {
     console.log(chalk.gray('   ℹ 阶段一：通过 md.doocs.org 转换格式...'));
 
     converterPage = await openPage(config.converterUrl);
+
+    // Prepare cover early — must read the body's first image BEFORE we strip it.
+    // When the cover came from that first image (no frontmatter `cover`), strip it
+    // so it isn't duplicated as both cover and body content.
+    coverB64 = await prepareCoverImage(converterPage, article).catch(() => null);
+    let bodyContent = article.content;
+    if (options.removeCoverImg && coverB64 && !article.meta?.cover) bodyContent = stripFirstImage(bodyContent);
 
     // Wait for CodeMirror editor
     const cmEl = await findElement(converterPage, ['.CodeMirror', '.cm-editor .cm-content', '.CodeMirror-code'], 10000);
@@ -37,7 +131,7 @@ export async function publish(article, options = {}) {
       const clipOk = await converterPage.evaluate(async (text) => {
         try { await navigator.clipboard.writeText(text); return true; }
         catch { return false; }
-      }, preprocessCallouts(article.content));
+      }, preprocessCallouts(bodyContent));
       if (!clipOk) throw new Error('剪贴板写入失败，请检查浏览器权限');
       await converterPage.keyboard.press(`${MOD}+V`);
       await converterPage.waitForTimeout(800);
@@ -127,7 +221,12 @@ export async function publish(article, options = {}) {
     // WeChat MP now uses ProseMirror (not iframe UEditor).
     try {
       console.log(chalk.gray('   寻找编辑器...'));
-      const editorEl = await findElement(editorPage, ['.ProseMirror[contenteditable="true"]', '.editor_content_placeholder', '.edui-default[contenteditable="true"]', '.js_editor_area [contenteditable="true"]', '.editor_area [contenteditable="true"]'], 10000);
+      // WeChat's title is ALSO a contenteditable and precedes the body in the
+      // DOM, so a bare .ProseMirror selector resolves to the title and dumps the
+      // content into it. Put the body-scoped selectors (.js_editor_area /
+      // .editor_area, already established in this codebase) first, and make the
+      // fallback .ProseMirror explicitly exclude the title field.
+      const editorEl = await findElement(editorPage, ['.js_editor_area .ProseMirror[contenteditable="true"]', '.js_editor_area [contenteditable="true"]', '.editor_area [contenteditable="true"]', '.ProseMirror[contenteditable="true"]:not(#title):not([data-placeholder*="标题"])', '.editor_content_placeholder', '.edui-default[contenteditable="true"]'], 10000);
       if (editorEl) {
         await editorPage.click(editorEl.selector);
         await editorPage.waitForTimeout(200);
@@ -153,6 +252,14 @@ export async function publish(article, options = {}) {
       }
     }
 
+    // Upload + set cover (prepared above from frontmatter `cover` / first image).
+    // The crop confirmation respects 封面自动确认 (autoCover).
+    let setCover = false;
+    if (coverB64) {
+      console.log(chalk.gray('   ℹ 正在上传封面到图片库...'));
+      setCover = await setWechatCover(editorPage, coverB64, options.autoCover !== false);
+    }
+
     // Log unsupported category/tag pass-through
     const categories = article.meta.category?.length ? article.meta.category : options.category;
     const tags = article.meta.tag?.length ? article.meta.tag : options.tag;
@@ -164,7 +271,7 @@ export async function publish(article, options = {}) {
     await converterPage.close().catch(() => {});
     converterPage = null; // Prevent double-close in finally
 
-    const parts = [filledTitle && '标题', filledContent && '内容'].filter(Boolean);
+    const parts = [filledTitle && '标题', filledContent && '内容', setCover && '封面'].filter(Boolean);
     const message = parts.length ? `已填充${parts.join('、')}` : '未能自动填充，请手动操作';
     return { success: filledContent, platform: config.name, message };
   } catch (err) {

@@ -1,7 +1,10 @@
 import chalk from 'chalk';
+import { writeFile, unlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PLATFORMS } from '../config.js';
 import { withPage, ensureLoggedIn, pasteText, findElement, fillTitle } from '../browser.js';
-import { preprocessCallouts, prepareCoverImage, injectCoverToInput, stripFirstImage } from '../parser.js';
+import { preprocessCallouts, prepareCoverImage, coverFileMeta, stripFirstImage } from '../parser.js';
 
 const config = PLATFORMS.zhihu;
 
@@ -93,17 +96,40 @@ export async function publish(article, options = {}) {
       console.log(chalk.gray('   ℹ 分类/标签请手动设置'));
     }
 
-    // Step 3: Set cover image (first article image)
+    // Step 3: Set cover image (frontmatter `cover`, else first content image).
+    // 知乎的封面框（发布设置 → 添加文章封面）触发的是一个【原生文件选择框】，
+    // 隐藏的 .UploadPicture-input 并不响应程序化注入 —— 旧的 injectCoverToInput
+    // 会静默失败却仍报成功。正解：拦截 filechooser 并点击封面框；上传后直接渲染
+    // 预览（无裁剪步骤），成功信号是出现 <img alt="封面图">。
     let setCover = false;
-    if (coverB64 && await page.locator('.UploadPicture-input').count() > 0) {
-      console.log(chalk.gray('   ℹ 正在上传封面图片...'));
+    if (coverB64) {
+      let tmpPath = null;
       try {
-        await injectCoverToInput(page, '.UploadPicture-input', coverB64);
-        await page.waitForTimeout(3000);
+        const ext = coverFileMeta(coverB64).name.split('.').pop();
+        tmpPath = join(tmpdir(), `md-pub-cover-${process.pid}-zhihu.${ext}`);
+        await writeFile(tmpPath, Buffer.from(coverB64, 'base64'));
+
+        // The cover box is a <label> wrapping the file input; clicking it opens
+        // a native file chooser. Use an actionable locator click (auto-scrolls,
+        // targets the element, avoids covered points) — raw coordinate clicks
+        // miss once pasted content shifts the layout under the sticky footer.
+        const coverBox = page.locator('.UploadPicture-wrapper').first();
+        await coverBox.scrollIntoViewIfNeeded({ timeout: 5000 });
+
+        console.log(chalk.gray('   ℹ 正在上传封面图片...'));
+        const chooserPromise = page.waitForEvent('filechooser', { timeout: 8000 });
+        await coverBox.click({ timeout: 5000 });
+        const chooser = await chooserPromise;
+        await chooser.setFiles(tmpPath);
+
+        // Wait for the uploaded cover preview to render before claiming success.
+        await page.locator('img[alt="封面图"]').first().waitFor({ state: 'visible', timeout: 15000 });
         setCover = true;
         console.log(chalk.green('   ✓ 已设置封面图片'));
       } catch (err) {
         console.log(chalk.yellow(`   ⚠ 封面图片设置失败: ${err.message}`));
+      } finally {
+        if (tmpPath) await unlink(tmpPath).catch(() => {});
       }
     }
 

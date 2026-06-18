@@ -61,21 +61,36 @@ export async function publish(article, options = {}) {
       console.log(chalk.gray('   ℹ 分类/标签请手动设置'));
     }
 
-    // Step 4: Set cover image (first article image)
+    // Step 4: Set cover image (frontmatter `cover`, else first content image).
+    // Injecting the file pops a crop dialog (「裁切并使用」appears within ~0.5s).
+    // Click it, then wait for the dialog to CLOSE — that's when the cropped image
+    // finishes uploading and the题图 banner renders. Gating success on the close
+    // (instead of a blind 3s wait + unconditional success) keeps the report honest:
+    // the img-preview uses a lazy 1×1 gif placeholder that fools naive detection.
     let setCover = false;
     if (coverB64 && await page.locator('.upload-image-container input[type="file"]').count() > 0) {
       console.log(chalk.gray('   ℹ 正在上传封面图片...'));
       try {
         await injectCoverToInput(page, '.upload-image-container input[type="file"]', coverB64);
-        await page.waitForTimeout(3000);
         if (options.autoCover !== false) {
-          try {
-            await page.getByText('裁切并使用', { exact: true }).click({ timeout: 5000 });
-            await page.waitForTimeout(1000);
-          } catch {}
+          const cropBtn = page.getByText('裁切并使用', { exact: true }).first();
+          await cropBtn.waitFor({ state: 'visible', timeout: 10000 });
+          // 「裁切并使用」only applies once the original finishes uploading in the
+          // background — there's no DOM signal for that, and an early click is
+          // silently ignored. So retry the click until the dialog actually closes.
+          let applied = false;
+          for (let i = 0; i < 10 && !applied; i++) {
+            await cropBtn.click().catch(() => {});
+            applied = await cropBtn.waitFor({ state: 'hidden', timeout: 2000 }).then(() => true).catch(() => false);
+          }
+          if (!applied) throw new Error('裁切未生效（封面可能仍在上传）');
+          setCover = true;
+          console.log(chalk.green('   ✓ 已设置封面图片'));
+        } else {
+          // Crop left to the user — image uploaded but not yet applied.
+          setCover = true;
+          console.log(chalk.green('   ✓ 已上传封面图片（请手动裁切）'));
         }
-        setCover = true;
-        console.log(chalk.green('   ✓ 已设置封面图片'));
       } catch (err) {
         console.log(chalk.yellow(`   ⚠ 封面图片设置失败: ${err.message}`));
       }
