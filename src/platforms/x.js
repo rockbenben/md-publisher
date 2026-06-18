@@ -406,7 +406,7 @@ export async function publish(article, options = {}) {
 
     // ── Parse content ──
     // If removeCoverImg, strip first image from content (it's used as cover via Phase 4)
-    const contentForParse = options.removeCoverImg ? stripFirstImage(article.content) : article.content;
+    const contentForParse = (options.removeCoverImg && !article.meta?.cover) ? stripFirstImage(article.content) : article.content;
     const { segments, images, codeBlocks } = parseSegments(contentForParse, article.filePath);
     const textCount = segments.filter(s => s.type === 'text').length;
     console.log(chalk.gray(`   ℹ 解析: ${textCount} 段文本, ${images.length} 张图片, ${codeBlocks.length} 个代码块`));
@@ -525,7 +525,7 @@ export async function publish(article, options = {}) {
 
     // ── Phase 4: Set cover image (always from ORIGINAL article content) ──
     let setCover = false;
-    const allOrigImages = options.removeCoverImg
+    const allOrigImages = (options.removeCoverImg && !article.meta?.cover)
       ? parseSegments(article.content, article.filePath).images
       : images;
     const coverImg = allOrigImages[0];

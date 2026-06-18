@@ -71,7 +71,7 @@ async function main() {
     return;
   }
 
-  // Step 5: Process each article × each platform sequentially
+  // Step 4: Process each article × each platform sequentially
   const allResults = [];
 
   for (let ai = 0; ai < articles.length; ai++) {
@@ -105,7 +105,7 @@ async function main() {
     }
   }
 
-  // Step 6: Print summary
+  // Step 5: Print summary
   // CJK-aware string padding: each character with code point ≥ 0x1100 occupies 2 columns
   const displayWidth = (s) => { let w = 0; for (const c of s) w += c.codePointAt(0) >= 0x1100 ? 2 : 1; return w; };
   const padCJK = (s, width) => s + ' '.repeat(Math.max(0, width - displayWidth(s)));
@@ -128,7 +128,7 @@ async function main() {
     }
   }
 
-  // Step 7: Keep browser open for review
+  // Step 6: Keep browser open for review
   await waitForEnter('\n✅ 所有平台已处理完毕，请在浏览器中检查各标签页内容。\n   检查完毕后按 Enter 关闭浏览器...');
   await closeContext();
 }
@@ -238,7 +238,10 @@ function gracefulShutdown() {
   if (_shuttingDown) return;
   _shuttingDown = true;
   console.log(chalk.gray('\n   正在关闭浏览器...'));
-  closeContext().catch(() => {}).finally(() => process.exit(0));
+  // Force-exit backstop: closeContext() now awaits an in-flight browser launch,
+  // which can be slow or hang — never trap Ctrl+C waiting on it (mirrors gui.js).
+  const forceExit = setTimeout(() => process.exit(0), 3000);
+  closeContext().catch(() => {}).finally(() => { clearTimeout(forceExit); process.exit(0); });
 }
 process.on('SIGINT', gracefulShutdown);
 process.on('SIGTERM', gracefulShutdown);

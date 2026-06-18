@@ -35,7 +35,7 @@ export async function publish(article, options = {}) {
 
     // Step 2: Paste markdown into CKEditor body
     let content = article.content;
-    if (options.removeCoverImg && coverB64) content = stripFirstImage(content);
+    if (options.removeCoverImg && coverB64 && !article.meta?.cover) content = stripFirstImage(content);
     const transformed = transformContent(content);
     const editorEl = await findElement(page, ['.ck-editor__editable', '.ck-content', '.ck-editor__editable_inline', '.wangEditor-txt', '.ProseMirror', '[contenteditable="true"]', 'div[role="textbox"]']);
     if (editorEl) {

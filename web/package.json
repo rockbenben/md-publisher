@@ -1,0 +1,29 @@
+{
+  "name": "md-publisher-web",
+  "private": true,
+  "version": "0.4.0",
+  "type": "module",
+  "description": "md-publisher GUI — React 19 + antd 6 frontend",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^6.2.5",
+    "@fontsource-variable/fraunces": "^5.2.9",
+    "@fontsource-variable/hanken-grotesk": "^5.2.8",
+    "@fontsource/ibm-plex-mono": "^5.2.7",
+    "antd": "^6.4.3",
+    "motion": "^12.40.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.0.2",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16"
+  }
+}

@@ -1,0 +1,184 @@
+/* ============================================================
+   md-publisher GUI — warm paper + cinnabar visual layer.
+   Sits on top of antd's interaction base.
+   ============================================================ */
+
+:root {
+  /* Palette — warm paper + ink, single cinnabar accent */
+  --paper: #f6f1e7;
+  --paper-raised: #fcfaf3;
+  --paper-sunken: #efe8d8;
+  --ink: #1c1a17;
+  --ink-soft: #5c564c;
+  --ink-faint: #8a8276;
+  --rule: #dad2c2;
+  --rule-strong: #c8bda6;
+  --cinnabar: #c23b2e;
+  --cinnabar-deep: #9e2d22;
+  --seal-wash: rgba(194, 59, 46, 0.08);
+  --amber: #c9a14b;
+  --airmail: #2e5077;
+  --verdigris: #3f7a4e;
+  --slug-bg: #191714;
+  --slug-fg: #e8e1d2;
+  --slug-faint: #7d7768;
+
+  /* Type roles — bundled Latin/mono + system CJK (no webfont for CJK) */
+  --font-display: 'Fraunces Variable', 'Fraunces', 'Songti SC', 'Noto Serif CJK SC',
+    'Noto Serif SC', Georgia, serif;
+  --font-ui: 'Hanken Grotesk Variable', 'Hanken Grotesk', 'PingFang SC',
+    'Microsoft YaHei', 'Noto Sans CJK SC', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', 'Cascadia Code',
+    'PingFang SC', 'Microsoft YaHei', monospace;
+
+  --kicker: 0.16em; /* editorial label letter-spacing */
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--paper);
+  /* Faint paper grain — atmosphere over a flat fill */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+  color: var(--ink);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--cinnabar);
+  color: var(--paper);
+}
+
+a {
+  color: var(--airmail);
+  text-underline-offset: 2px;
+}
+
+/* ---- Layout shell ---- */
+.shell {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 28px 64px;
+}
+
+/* ---- Editorial kicker / section label ---- */
+.kicker {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: var(--kicker);
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.kicker .cn {
+  font-family: var(--font-display);
+  font-size: 17px;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  text-transform: none;
+  color: var(--ink);
+}
+.kicker .en {
+  color: var(--ink-faint);
+}
+.kicker__rule {
+  flex: 1;
+  height: 1px;
+  background: var(--rule);
+  align-self: center;
+}
+
+/* ---- Perforation divider (stamp teeth) ---- */
+.perf {
+  height: 0;
+  border: 0;
+  border-top: 2px dotted var(--rule-strong);
+  margin: 0;
+  opacity: 0.85;
+}
+
+/* ---- Double rule (masthead) ---- */
+.double-rule {
+  height: 4px;
+  border-top: 1px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+}
+
+/* ---- Cards (paper-raised) ---- */
+.sheet {
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+}
+
+/* ---- antd surgical overrides (visual layer) ---- */
+.ant-app,
+.ant-app > div {
+  height: 100%;
+}
+
+/* Inputs/buttons: square, paper, ink — not antd default */
+.ant-input,
+.ant-input-affix-wrapper {
+  background: var(--paper-raised) !important;
+}
+.ant-btn-default {
+  border-color: var(--rule);
+}
+.ant-btn-default:not(:disabled):hover {
+  border-color: var(--cinnabar);
+  color: var(--cinnabar-deep);
+}
+
+/* Tooltips/messages mono for paths & system chatter */
+.ant-tooltip-inner,
+.ant-message-notice-content {
+  font-family: var(--font-ui);
+}
+
+/* Scrollbars — thin, ink */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--rule-strong);
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 6px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-faint);
+  background-clip: content-box;
+}
+
+@media (max-width: 720px) {
+  .shell {
+    padding: 0 16px 48px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

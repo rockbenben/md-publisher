@@ -53,7 +53,7 @@ export async function publish(article, options = {}) {
     const coverB64 = await prepareCoverImage(page, article).catch(() => null);
 
     let content = article.content;
-    if (options.removeCoverImg && coverB64) content = stripFirstImage(content);
+    if (options.removeCoverImg && coverB64 && !article.meta?.cover) content = stripFirstImage(content);
     const transformed = transformContent(preprocessCallouts(content));
 
     let filledContent = false;

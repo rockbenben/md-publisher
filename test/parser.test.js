@@ -8,6 +8,7 @@ import {
   parseArticleString,
   preprocessCallouts,
   stripFirstImage,
+  firstContentImageSrc,
   scanArticleDir,
   loadProjectConfig,
 } from '../src/parser.js';
@@ -103,6 +104,13 @@ test('preprocessCallouts: leaves normal text untouched', () => {
   assert.equal(preprocessCallouts(input), input);
 });
 
+test('preprocessCallouts: does not convert callout literals inside fenced code', () => {
+  const md = '```markdown\n> [!NOTE]\n```\n\n> [!TIP]';
+  const out = preprocessCallouts(md);
+  assert.ok(out.includes('> [!NOTE]'), 'in-code literal preserved');
+  assert.ok(out.includes('💡 **Tip**'), 'real callout outside code still converted');
+});
+
 // ─── stripFirstImage ─────────────────────────────────────────────────────────
 
 test('stripFirstImage: removes only the first standalone image', () => {
@@ -116,6 +124,20 @@ test('stripFirstImage: removes only the first standalone image', () => {
 test('stripFirstImage: no-op when there is no leading image', () => {
   const md = 'just text, no images here';
   assert.equal(stripFirstImage(md), md);
+});
+
+test('stripFirstImage: does not remove an image line inside a fenced code block', () => {
+  const md = '```markdown\n![demo](https://x/demo.png)\n```\n\n![real](https://x/real.png)';
+  const out = stripFirstImage(md);
+  assert.ok(out.includes('demo.png'), 'in-code example line preserved');
+  assert.ok(!out.includes('real.png'), 'first real image (outside code) removed');
+});
+
+test('firstContentImageSrc: ignores images inside fenced code blocks', () => {
+  const md = '```\n![x](in-code.png)\n```\n\n![y](real.png)';
+  assert.equal(firstContentImageSrc(md), 'real.png');
+  assert.equal(firstContentImageSrc('no images'), undefined);
+  assert.equal(firstContentImageSrc('![a](first.png)'), 'first.png');
 });
 
 // ─── scanArticleDir (offline fs integration) ─────────────────────────────────

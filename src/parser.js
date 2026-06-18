@@ -40,11 +40,17 @@ export function parseArticleString(raw, filePath) {
   // Ensure scalar values — YAML can produce objects/arrays for fields we expect as strings
   const str = (v) => (typeof v === 'string' || typeof v === 'number') ? String(v) : '';
 
-  // If no frontmatter title, extract from first H1 heading
+  // If no frontmatter title, extract from the first H1 heading — skipping
+  // fenced code blocks so a `# comment` inside ```...``` isn't mistaken for it.
   let title = str(data.title);
   if (!title) {
-    const h1Match = content.match(/^#\s+(.+)$/m);
-    if (h1Match) title = h1Match[1].trim();
+    let inCode = false;
+    for (const line of content.split('\n')) {
+      if (/^```/.test(line)) { inCode = !inCode; continue; }
+      if (inCode) continue;
+      const m = line.match(/^#\s+(.+)$/);
+      if (m) { title = m[1].trim(); break; }
+    }
   }
 
   return {
@@ -55,6 +61,7 @@ export function parseArticleString(raw, filePath) {
       date: data.date instanceof Date ? data.date.toISOString().slice(0, 10) : str(data.date),
       category: Array.isArray(data.category) ? data.category : data.category ? [data.category] : [],
       tag: Array.isArray(data.tag) ? data.tag : data.tag ? [data.tag] : [],
+      cover: str(data.cover),
     },
     content: content.trim(),
     filePath,
@@ -276,19 +283,54 @@ const CALLOUT_EMOJI = {
   CAUTION: '\uD83D\uDED1',    // 🛑 
 };
 
-/** Convert GitHub callout syntax `> [!TYPE]` to emoji label. */
+/** Convert GitHub callout syntax `> [!TYPE]` to emoji label, skipping fenced
+ *  code blocks so a literal `> [!NOTE]` documented inside ```...``` is preserved. */
 export function preprocessCallouts(markdown) {
-  return markdown.replace(
-    /^(>\s*)\[!(WARNING|IMPORTANT|CAUTION|NOTE|TIP)\]\s*$/gm,
-    (_m, prefix, type) => `${prefix}${CALLOUT_EMOJI[type]} **${type.charAt(0) + type.slice(1).toLowerCase()}**  `
-  );
+  const re = /^(>\s*)\[!(WARNING|IMPORTANT|CAUTION|NOTE|TIP)\]\s*$/;
+  let inCode = false;
+  return markdown.split('\n').map((line) => {
+    if (/^```/.test(line)) { inCode = !inCode; return line; }
+    if (inCode) return line;
+    return line.replace(re, (_m, prefix, type) =>
+      `${prefix}${CALLOUT_EMOJI[type]} **${type.charAt(0) + type.slice(1).toLowerCase()}**  `);
+  }).join('\n');
 }
 
 // ─── Cover image helpers (shared across platforms) ───────────────────────────
 
-/** Remove the first markdown image line from content (for platforms that use it as cover). */
+/**
+ * Src of the first content image (inline or standalone) that is NOT inside a
+ * fenced code block. Keeps the cover off a `![](...)` that only appears inside
+ * a ```...``` example. Returns undefined when there is none.
+ */
+export function firstContentImageSrc(content) {
+  let inCode = false;
+  for (const line of content.split('\n')) {
+    if (/^```/.test(line)) { inCode = !inCode; continue; }
+    if (inCode) continue;
+    const m = line.match(/!\[[^\]]*\]\(([^)]+)\)/);
+    if (m) return m[1];
+  }
+  return undefined;
+}
+
+/**
+ * Remove the first standalone markdown image line (the one used as cover),
+ * skipping fenced code blocks so an image line inside ```...``` isn't deleted —
+ * that would both pick a wrong cover and corrupt the code example.
+ */
 export function stripFirstImage(content) {
-  return content.replace(/^\s*!\[[^\]]*\]\([^)]+\)\s*$/m, '').replace(/^\n{2,}/, '\n');
+  const lines = content.split('\n');
+  let inCode = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^```/.test(lines[i])) { inCode = !inCode; continue; }
+    if (inCode) continue;
+    if (/^\s*!\[[^\]]*\]\([^)]+\)\s*$/.test(lines[i])) {
+      lines.splice(i, 1);
+      break;
+    }
+  }
+  return lines.join('\n').replace(/^\n{2,}/, '\n');
 }
 
 const MAX_COVER_SIZE = 5242880; // 5MB
@@ -306,12 +348,13 @@ const MAX_COVER_SIZE = 5242880; // 5MB
  */
 export async function prepareCoverImage(page, article, { acceptWebp = false, maxSize = MAX_COVER_SIZE } = {}) {
   // 1. Download raw image (cached per article across platforms)
+  // Priority: frontmatter `cover` field > first image in content
   if (article._coverRaw === undefined) {
     article._coverRaw = null;
-    const imgSrc = (article.content.match(/!\[[^\]]*\]\(([^)]+)\)/) || [])[1];
-    if (imgSrc) {
+    const rawSrc = article.meta?.cover || firstContentImageSrc(article.content);
+    if (rawSrc) {
       try {
-        const src = imgSrc.trim().replace(/\?imageMogr2\/format\/webp$/, '');
+        const src = rawSrc.trim().replace(/\?imageMogr2\/format\/webp$/, '');
         if (/^https?:\/\//.test(src)) {
           const res = await fetch(src);
           if (res.ok) article._coverRaw = Buffer.from(await res.arrayBuffer());
@@ -319,7 +362,7 @@ export async function prepareCoverImage(page, article, { acceptWebp = false, max
           article._coverRaw = await readFile(resolve(dirname(article.filePath), src));
         }
       } catch (err) {
-        console.warn(`⚠ 封面图下载失败: ${imgSrc} — ${err.message}`);
+        console.warn(`⚠ 封面图下载失败: ${rawSrc} — ${err.message}`);
       }
     }
   }
@@ -359,12 +402,6 @@ export async function prepareCoverImage(page, article, { acceptWebp = false, max
   return article._coverJpegB64;
 }
 
-/**
- * Inject a base64 image into a file input via DataTransfer (works with Vue/React).
- * @param {Page} page - Playwright page
- * @param {string} selector - CSS selector for the file input
- * @param {string} base64Data - base64 encoded image data
- */
 /**
  * Pick the upload File MIME + name from a base64 image payload's magic prefix,
  * so a raw PNG/WEBP/GIF isn't mislabeled as image/jpeg (strict upload

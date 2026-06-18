@@ -5,3 +5,6 @@ settings.json
 *.log
 *.vbs.tmp
 %TEMP%*
+.gstack/
+.shots/
+*.tsbuildinfo

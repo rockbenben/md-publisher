@@ -67,7 +67,14 @@ export async function getContext() {
 export async function openPage(url) {
   const ctx = await getContext();
   const page = await ctx.newPage();
-  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: TIMEOUTS.navigation });
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: TIMEOUTS.navigation });
+  } catch (err) {
+    // Navigation failed (timeout / net error): close the orphan tab so a slow or
+    // unreachable site doesn't leak a page on every failed open/publish.
+    await page.close().catch(() => {});
+    throw err;
+  }
   return page;
 }
 
@@ -92,6 +99,12 @@ export async function withPage(url, fn) {
  * Close the browser context (with timeout to prevent hanging).
  */
 export async function closeContext() {
+  // A launch in flight hasn't assigned `context` yet. Without waiting we'd
+  // no-op and leave the just-launched browser open while reporting success
+  // (e.g. clicking "关闭浏览器" during the ~2s startup of a login check).
+  if (launching) {
+    try { await launching; } catch { /* launch failed: nothing to close */ }
+  }
   if (context) {
     const ctx = context;
     context = null; // Clear immediately so getContext() can re-launch if needed

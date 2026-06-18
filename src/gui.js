@@ -68,6 +68,24 @@ async function saveSettings(settings) {
   }
 }
 
+// Serialize settings writes. Both the settings route and the login-status
+// persist do read-modify-write on the whole settings object; running them
+// concurrently let the later writer clobber the other's field with a stale
+// snapshot. Chaining ensures each mutator reads the freshest cache (updated by
+// the prior saveSettings) inside its own turn. The tail swallows rejections so
+// one failed write can't wedge the chain.
+// Contract: `mutator(settings)` returns the full settings object to persist.
+let _settingsTail = Promise.resolve();
+function updateSettings(mutator) {
+  const result = _settingsTail.then(async () => {
+    const next = await mutator(loadSettings());
+    await saveSettings(next);
+    return next;
+  });
+  _settingsTail = result.then(() => {}, () => {});
+  return result;
+}
+
 // --- SSE clients ---
 const sseClients = new Set();
 
@@ -201,7 +219,7 @@ app.use(express.static(resolve(__dirname, 'public'), {
   setHeaders: (res) => { res.set('Cache-Control', 'no-store, no-cache, must-revalidate'); },
 }));
 
-// Express 4 doesn't catch async rejections — wrap async handlers
+// asyncHandler wraps routes to forward async rejections to the error middleware
 const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 // GET /api/platforms — list all platforms
@@ -226,8 +244,7 @@ app.post('/api/settings', asyncHandler(async (req, res) => {
     return res.status(400).json({ error: '无效的请求体' });
   }
   try {
-    const current = sanitizeSettings(loadSettings(), req.body);
-    await saveSettings(current);
+    const current = await updateSettings((s) => sanitizeSettings(s, req.body));
     res.json(current);
   } catch (err) {
     res.status(500).json({ error: `保存设置失败: ${err.message}` });
@@ -263,6 +280,7 @@ app.get('/api/articles', asyncHandler(async (req, res) => {
           title: a.meta.title || basename(a.filePath, ext),
           description: a.meta.description || '',
           date: a.meta.date || '',
+          cover: a.meta.cover || '',
           filePath: a.filePath,
           fileName: basename(a.filePath),
         };
@@ -304,6 +322,7 @@ app.post('/api/articles/parse', asyncHandler(async (req, res) => {
           title: a.meta.title || basename(a.filePath, ext),
           description: a.meta.description || '',
           date: a.meta.date || '',
+          cover: a.meta.cover || '',
           filePath: a.filePath,
           fileName: basename(a.filePath),
           manual: true,
@@ -321,6 +340,7 @@ app.post('/api/articles/parse', asyncHandler(async (req, res) => {
         title: article.meta.title || basename(absPath, ext),
         description: article.meta.description || '',
         date: article.meta.date || '',
+        cover: article.meta.cover || '',
         filePath: absPath,
         fileName: basename(absPath),
         manual: true,
@@ -348,16 +368,29 @@ app.post('/api/articles/upload', asyncHandler(async (req, res) => {
         origLog(`⚠ 跳过过大或无效的文件: ${f.name}`);
         continue;
       }
-      const safeName = sanitizeUploadFileName(f.name);
+      let safeName = sanitizeUploadFileName(f.name);
       // Skip files with unsupported extensions
       if (!ARTICLE_EXTS.has(extname(safeName).toLowerCase())) {
         origLog(`⚠ 跳过不支持的文件类型: ${f.name}`);
         continue;
       }
-      const tmpPath = resolve(UPLOAD_DIR, safeName);
+      let tmpPath = resolve(UPLOAD_DIR, safeName);
       if (!isPathWithin(tmpPath, UPLOAD_DIR)) {
         origLog(`⚠ 跳过非法文件名: ${f.name}`);
         continue;
+      }
+      // Disambiguate distinct files that share a basename (e.g. Hugo-style page
+      // bundles where every post is index.md). Without this the second file
+      // overwrites the first on disk AND collides on filePath, so the frontend
+      // dedups them to one row — silently dropping all but the last. Identical
+      // re-uploads keep the same name so they still dedup cleanly.
+      const stem = basename(safeName, extname(safeName));
+      const stemExt = extname(safeName);
+      let dup = 1;
+      while (existsSync(tmpPath) && readFileSync(tmpPath, 'utf-8') !== f.content) {
+        safeName = `${stem}-${dup}${stemExt}`;
+        tmpPath = resolve(UPLOAD_DIR, safeName);
+        dup++;
       }
       await writeFile(tmpPath, f.content, 'utf-8');
       // Parse in memory — skip the redundant readFileSync in parseArticle()
@@ -367,6 +400,7 @@ app.post('/api/articles/upload', asyncHandler(async (req, res) => {
         title: article.meta.title || basename(tmpPath, ext),
         description: article.meta.description || '',
         date: article.meta.date || '',
+        cover: article.meta.cover || '',
         filePath: tmpPath,
         fileName: f.name,
         manual: true,
@@ -567,6 +601,12 @@ let keptOpenPages = []; // Pages kept open for unlogged platforms (cleaned up on
 
 // POST /api/close-browser — close Playwright browser
 app.post('/api/close-browser', asyncHandler(async (req, res) => {
+  if (isPublishing) {
+    // Closing the shared context mid-publish would tear down the pages the
+    // automation is driving, failing every remaining platform. Block it,
+    // mirroring the check-login guard.
+    return res.status(409).json({ error: '发布进行中，无法关闭浏览器' });
+  }
   try {
     keptOpenPages = [];
     await closeContext();
@@ -688,13 +728,14 @@ async function checkAllLoginStatus() {
 
     // Persist login status to settings so it survives restarts
     try {
-      const s = loadSettings();
-      s.loginStatus = {};
-      for (const [id] of entries) {
-        const evt = lastLoginResults[id];
-        if (evt) s.loginStatus[id] = evt;
-      }
-      await saveSettings(s);
+      await updateSettings((s) => {
+        s.loginStatus = {};
+        for (const [id] of entries) {
+          const evt = lastLoginResults[id];
+          if (evt) s.loginStatus[id] = evt;
+        }
+        return s;
+      });
     } catch { /* ignore save errors */ }
   } finally {
     isCheckingLogin = false;

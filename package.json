@@ -12,15 +12,18 @@
     "start": "node src/index.js",
     "publish": "node src/index.js",
     "gui": "node src/gui.js",
+    "web:install": "npm --prefix web install",
+    "web:dev": "npm --prefix web run dev",
+    "web:build": "npm --prefix web run build",
     "test": "node --test"
   },
   "dependencies": {
-    "@inquirer/prompts": "^7.0.0",
+    "@inquirer/prompts": "^8.5.2",
     "chalk": "^5.3.0",
-    "express": "^4.21.0",
+    "express": "^5.2.1",
     "gray-matter": "^4.0.3",
-    "js-yaml": "^3.14.1",
-    "marked": "^15.0.0",
-    "playwright": "^1.50.0"
+    "js-yaml": "^4.2.0",
+    "marked": "^18.0.5",
+    "playwright": "^1.60.0"
   }
 }
