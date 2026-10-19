@@ -73,6 +73,10 @@ export const TIMEOUTS = {
   navigation: 30000,
   selector: 10000,
   login: 300000, // 5 minutes for manual login
+  // Browser (CDP) connect — how long to wait for a freshly-spawned Chrome to
+  // start listening on its remote-debugging port, and how often to retry.
+  browserConnect: 20000,
+  browserConnectInterval: 300,
   // Paste timing — clipboard API has no reliable DOM event to wait on,
   // so fixed delays are necessary. These values are tuned for typical machines;
   // increase if paste fails on slow systems.

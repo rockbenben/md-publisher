@@ -1,0 +1,55 @@
+name: build
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# electron-builder publishes the release with GITHUB_TOKEN. Without this the
+# default workflow token is read-only and every tagged build fails at publish.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          # Electron 44 requires Node >= 22.12.0; Vite 8 requires
+          # ^20.19.0 || >=22.12.0.
+          node-version: 22
+          cache: npm
+      - name: Install root deps
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Unit tests
+        run: npm test
+      - name: Install web deps
+        # `npm ci`, not `install`: web/ has its own lockfile and all-caret
+        # ranges, so `install` could build a tagged release from versions that
+        # were never committed or reviewed.
+        run: npm run web:ci
+      - name: Build web
+        run: npm run web:build
+      - name: Build & publish
+        run: npx electron-builder --publish onTagOrDraft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: md-publisher-${{ matrix.os }}
+          path: |
+            release/*.exe
+            release/*.dmg
+            release/*.AppImage
+            release/*.deb
+          if-no-files-found: ignore

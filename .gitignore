@@ -3,8 +3,7 @@ user-data/
 settings.json
 .uploads/
 *.log
-*.vbs.tmp
-%TEMP%*
 .gstack/
 .shots/
 *.tsbuildinfo
+release/

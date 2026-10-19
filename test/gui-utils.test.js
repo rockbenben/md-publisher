@@ -82,6 +82,13 @@ test('sanitizeSettings: keeps whitelisted, well-typed fields', () => {
   assert.deepEqual(out.defaultPlatforms, ['zhihu']);
 });
 
+test('sanitizeSettings: keeps a string chromePath, rejects a non-string one', () => {
+  const ok = sanitizeSettings({}, { chromePath: 'C:/Browsers/brave.exe' });
+  assert.equal(ok.chromePath, 'C:/Browsers/brave.exe');
+  const bad = sanitizeSettings({ chromePath: 'keep' }, { chromePath: 123 });
+  assert.equal(bad.chromePath, 'keep', 'mistyped chromePath ignored, current preserved');
+});
+
 test('sanitizeSettings: never lets a client overwrite server-owned loginStatus', () => {
   // loginStatus is persisted by the server's login check; a client save carries
   // a stale snapshot and must not clobber it.

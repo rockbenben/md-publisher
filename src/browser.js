@@ -2,62 +2,217 @@ import { chromium } from 'playwright';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createInterface } from 'readline';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import chalk from 'chalk';
 import { TIMEOUTS } from './config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const USER_DATA_DIR = resolve(__dirname, '../user-data');
+// Chrome profile dir — must be writable: userData in the packaged app
+// (via MDPUB_DATA_DIR), repo root in dev/CLI.
+const USER_DATA_DIR = process.env.MDPUB_DATA_DIR
+  ? resolve(process.env.MDPUB_DATA_DIR, 'user-data')
+  : resolve(__dirname, '../user-data');
+// Same writable base as gui.js — used to read the GUI's "browser path" setting.
+const SETTINGS_FILE = resolve(process.env.MDPUB_DATA_DIR || resolve(__dirname, '..'), 'settings.json');
+
+/** Browser path configured in the GUI (settings.json), or '' if unset/unreadable. */
+function configuredChromePath() {
+  try {
+    const s = JSON.parse(readFileSync(SETTINGS_FILE, 'utf-8'));
+    return typeof s?.chromePath === 'string' ? s.chromePath.trim() : '';
+  } catch { return ''; }
+}
+
+// CDP endpoint for the long-lived Chrome. The browser runs as an INDEPENDENT
+// (detached) process — not a child of this Node process — so closing the
+// terminal / restarting the server reconnects to the same Chrome (and its
+// logged-in tabs) instead of killing it. Override the port with CDP_PORT.
+// Default avoids 9222 (the conventional port — frequently taken by other dev
+// tools) and the GUI's HTTP port to keep collisions unlikely.
+const CDP_PORT = Number(process.env.CDP_PORT) || 9322;
+const CDP_URL = `http://127.0.0.1:${CDP_PORT}`;
 
 /** Platform-aware modifier key: Meta (Cmd) on macOS, Control on Windows/Linux */
 export const MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
 
-let context = null;
-let launching = null; // mutex: prevents concurrent launches
+let browser = null;   // Playwright Browser from connectOverCDP
+let context = null;   // The persistent default context (carries the profile)
+let chromeProc = null; // The detached Chrome we spawned (null if we reconnected)
+let connecting = null; // mutex: prevents concurrent connect/launch races
 let guiMode = false;
+
+const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Locate a Chromium-based browser to launch with a debugging port. The app
+ * drives the browser purely by path over CDP, so any Chromium-family browser
+ * works (Chrome, Edge, Brave, Vivaldi, Chromium, …). On Windows, Edge is
+ * preinstalled, so a machine without Chrome still resolves here.
+ * Order: GUI "browser path" setting (settings.json) → CHROME_PATH env →
+ * common install paths (Chrome → Edge → mainstream → 国内主流) → Playwright's
+ * bundled Chromium (last resort, only if browsers were installed).
+ */
+function detectChromePath() {
+  // Explicit overrides first: the in-app setting, then the env var.
+  const configured = configuredChromePath();
+  if (configured && existsSync(configured)) return configured;
+  if (process.env.CHROME_PATH && existsSync(process.env.CHROME_PATH)) {
+    return process.env.CHROME_PATH;
+  }
+  const candidates = [];
+  if (process.platform === 'win32') {
+    const pf = process.env['ProgramFiles'] || 'C:\\Program Files';
+    const pfx86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+    const local = process.env['LOCALAPPDATA'];
+    candidates.push(
+      `${pf}\\Google\\Chrome\\Application\\chrome.exe`,
+      `${pfx86}\\Google\\Chrome\\Application\\chrome.exe`,
+      local && `${local}\\Google\\Chrome\\Application\\chrome.exe`,
+      `${pfx86}\\Microsoft\\Edge\\Application\\msedge.exe`,
+      `${pf}\\Microsoft\\Edge\\Application\\msedge.exe`,
+      local && `${local}\\Chromium\\Application\\chrome.exe`,
+      `${pf}\\BraveSoftware\\Brave-Browser\\Application\\brave.exe`,
+      local && `${local}\\BraveSoftware\\Brave-Browser\\Application\\brave.exe`,
+      local && `${local}\\Vivaldi\\Application\\vivaldi.exe`,
+      // 国内主流 Chromium 浏览器（CDP 支持因版本而异；不行时用 GUI「浏览器路径」指定）
+      local && `${local}\\360ChromeX\\Chrome\\Application\\360ChromeX.exe`,
+      local && `${local}\\360Chrome\\Chrome\\Application\\360chrome.exe`,
+      `${pfx86}\\Tencent\\QQBrowser\\QQBrowser.exe`,
+      `${pfx86}\\SogouExplorer\\SogouExplorer.exe`,
+    );
+  } else if (process.platform === 'darwin') {
+    candidates.push(
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+      '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+      '/Applications/Chromium.app/Contents/MacOS/Chromium',
+      '/Applications/Vivaldi.app/Contents/MacOS/Vivaldi',
+    );
+  } else {
+    candidates.push(
+      '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable',
+      '/usr/bin/microsoft-edge', '/usr/bin/microsoft-edge-stable',
+      '/usr/bin/chromium', '/usr/bin/chromium-browser', '/snap/bin/chromium',
+      '/usr/bin/brave-browser', '/usr/bin/vivaldi-stable',
+    );
+  }
+  for (const c of candidates) { if (c && existsSync(c)) return c; }
+  try {
+    const p = chromium.executablePath();
+    if (p && existsSync(p)) return p;
+  } catch { /* bundled chromium not installed */ }
+  return null;
+}
+
+/**
+ * Spawn Chrome as a DETACHED process listening on the CDP port, using our
+ * dedicated profile dir (NOT the user's everyday Chrome profile). `detached`
+ * + `unref()` means it outlives this Node process — the whole point of the
+ * decoupling: a closed terminal or crashed server no longer kills the browser.
+ */
+function launchChrome(chromePath) {
+  const args = [
+    `--remote-debugging-port=${CDP_PORT}`,
+    `--user-data-dir=${USER_DATA_DIR}`,
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-blink-features=AutomationControlled',
+    '--window-size=1280,900',
+    '--lang=zh-CN',
+  ];
+  const child = spawn(chromePath, args, { detached: true, stdio: 'ignore' });
+  child.unref();
+  return child;
+}
+
+/** Retry connectOverCDP until Chrome is up or the deadline passes. */
+async function connectCDP(deadline) {
+  let lastErr;
+  for (;;) {
+    try {
+      return await chromium.connectOverCDP(CDP_URL, { timeout: 3000 });
+    } catch (err) {
+      lastErr = err;
+      if (Date.now() >= deadline) throw lastErr;
+      await delay(TIMEOUTS.browserConnectInterval);
+    }
+  }
+}
 
 /** Enable GUI mode — skips terminal-based waitForEnter calls */
 export function setGuiMode(enabled) { guiMode = enabled; }
 
 /**
- * Get or create the persistent browser context.
- * Uses system Chrome in headed mode, with login state persisted in user-data/.
- * - Detects broken/disconnected context and re-launches.
- * - Mutex prevents concurrent launches from racing.
+ * Get the persistent browser context, connecting over CDP to a long-lived
+ * Chrome (login state persisted in user-data/).
+ * - First tries to connect to an ALREADY-RUNNING Chrome (so a restarted server
+ *   reattaches instead of relaunching).
+ * - If none is running, spawns a detached Chrome and connects to it.
+ * - Mutex prevents concurrent connect/launch from racing.
  */
 export async function getContext() {
-  // Fast path: context exists and is healthy
-  if (context) {
+  // Fast path: connected and healthy
+  if (context && browser?.isConnected()) return context;
+
+  // Mutex: if another call is already connecting, wait for it
+  if (connecting) return connecting;
+
+  connecting = (async () => {
+    // 1. Try an already-running Chrome (survives terminal close / server restart)
     try {
-      // Quick health check — if browser is disconnected this will throw
-      context.pages();
-      return context;
+      browser = await chromium.connectOverCDP(CDP_URL, { timeout: 2000 });
     } catch {
-      console.log(chalk.yellow('   ⚠ 浏览器连接已断开，正在重新启动...'));
-      context = null;
+      // 2. Not running — launch our own detached Chrome, then connect
+      const chromePath = detectChromePath();
+      if (!chromePath) {
+        throw new Error('未找到 Chrome / Edge 等 Chromium 内核浏览器。请安装 Chrome 或 Edge，或用环境变量 CHROME_PATH 指定任意 Chromium 内核浏览器的可执行文件路径');
+      }
+      console.log(chalk.gray('   正在启动浏览器...'));
+      chromeProc = launchChrome(chromePath);
+      try {
+        browser = await connectCDP(Date.now() + TIMEOUTS.browserConnect);
+      } catch (err) {
+        // Two common causes: (1) another Chrome already has the user-data
+        // profile open, so our launch just delegated to it and never opened a
+        // debug port; (2) the port is occupied by an unrelated program.
+        throw new Error(
+          `无法连接到浏览器调试端口 ${CDP_PORT}（${err.message}）。` +
+          `可能是已有 Chrome 占用了本应用的配置目录（请关闭后重试），` +
+          `或端口被其他程序占用（可用环境变量 CDP_PORT 指定其他端口）。`,
+          { cause: err },
+        );
+      }
     }
-  }
 
-  // Mutex: if another call is already launching, wait for it
-  if (launching) return launching;
+    // Reset state when this browser disconnects, so the next call reconnects
+    // (or relaunches). Guard against a stale handler nulling a newer browser.
+    const b = browser;
+    b.on('disconnected', () => {
+      if (browser === b) { browser = null; context = null; }
+    });
 
-  launching = chromium.launchPersistentContext(USER_DATA_DIR, {
-    headless: false,
-    channel: 'chrome',
-    viewport: { width: 1280, height: 900 },
-    locale: 'zh-CN',
-    args: ['--disable-blink-features=AutomationControlled'],
-    permissions: ['clipboard-read', 'clipboard-write'],
-  });
+    // The persistent default context carries the user-data profile + logins.
+    context = browser.contexts()[0];
+    if (!context) throw new Error('浏览器上下文不可用');
+
+    // launchPersistentContext used to grant these via the `permissions` option;
+    // over CDP we grant them explicitly (needed for clipboard-based pasting).
+    try {
+      await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    } catch { /* some channels reject unknown permissions — paste still works */ }
+
+    return context;
+  })();
 
   try {
-    context = await launching;
-    return context;
+    return await connecting;
   } catch (err) {
+    browser = null;
     context = null;
     throw err;
   } finally {
-    launching = null;
+    connecting = null;
   }
 }
 
@@ -96,28 +251,53 @@ export async function withPage(url, fn) {
 }
 
 /**
- * Close the browser context (with timeout to prevent hanging).
+ * Fully QUIT the Chrome process (for the "关闭浏览器" button and CLI cleanup).
+ * Over CDP, browser.close() only disconnects; to actually terminate Chrome we
+ * issue the CDP `Browser.close` command (works even if WE didn't spawn it, e.g.
+ * after a server restart reconnected to a pre-existing Chrome).
  */
 export async function closeContext() {
-  // A launch in flight hasn't assigned `context` yet. Without waiting we'd
-  // no-op and leave the just-launched browser open while reporting success
-  // (e.g. clicking "关闭浏览器" during the ~2s startup of a login check).
-  if (launching) {
-    try { await launching; } catch { /* launch failed: nothing to close */ }
+  // A connect in flight hasn't assigned `browser` yet. Without waiting we'd
+  // no-op and leave the just-launched browser open while reporting success.
+  if (connecting) {
+    try { await connecting; } catch { /* connect failed: nothing to close */ }
   }
-  if (context) {
-    const ctx = context;
-    context = null; // Clear immediately so getContext() can re-launch if needed
+  const b = browser;
+  browser = null;
+  context = null; // Clear immediately so getContext() can reconnect if needed
+  if (b) {
     try {
       let timer;
       await Promise.race([
-        ctx.close(),
+        b.newBrowserCDPSession().then((s) => s.send('Browser.close')),
         new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('close timeout')), 5000); }),
       ]).finally(() => clearTimeout(timer));
     } catch {
-      // Ignore close errors — browser may already be gone
+      // CDP close failed — fall back to just disconnecting
+      try { await b.close(); } catch { /* already gone */ }
     }
   }
+  // Backstop: if we spawned it and it's still alive, kill the process
+  if (chromeProc && !chromeProc.killed) { try { chromeProc.kill(); } catch {} }
+  chromeProc = null;
+}
+
+/**
+ * DISCONNECT from Chrome without quitting it (for server process exit:
+ * SIGINT / crash). This is what makes the browser survive a closed terminal —
+ * Node drops the CDP socket on exit, but the detached Chrome keeps running with
+ * all its logged-in tabs, ready for the next launch to reconnect.
+ */
+export async function disconnectContext() {
+  if (connecting) {
+    try { await connecting; } catch { /* nothing to disconnect */ }
+  }
+  const b = browser;
+  browser = null;
+  context = null;
+  // Do NOT call Browser.close — just drop our handle. b.close() on a
+  // connectOverCDP browser merely disconnects (Chrome is not Playwright-owned).
+  if (b) { try { await b.close(); } catch {} }
 }
 
 /**
@@ -172,30 +352,6 @@ export async function pasteHtml(page, selector, html) {
   }, html);
   if (!ok) throw new Error('剪贴板写入失败，请检查浏览器权限');
   await selectAllAndPaste(page, selector);
-}
-
-/**
- * Paste an image into the currently focused element via clipboard.
- * Reads the image as a PNG blob and writes it to the clipboard, then Ctrl+V.
- * @param {import('playwright').Page} page
- * @param {Buffer} imageBuffer - Raw image bytes (PNG or JPEG)
- * @param {string} mimeType - e.g. 'image/png' or 'image/jpeg'
- */
-export async function pasteImage(page, imageBuffer, mimeType = 'image/png') {
-  const b64 = imageBuffer.toString('base64');
-  const ok = await page.evaluate(async ({ b64Data, mime }) => {
-    try {
-      const bin = atob(b64Data);
-      const bytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      const blob = new Blob([bytes], { type: mime });
-      await navigator.clipboard.write([new ClipboardItem({ [mime]: blob })]);
-      return true;
-    } catch { return false; }
-  }, { b64Data: b64, mime: mimeType });
-  if (!ok) throw new Error('图片剪贴板写入失败');
-  await page.keyboard.press(`${MOD}+V`);
-  await page.waitForTimeout(TIMEOUTS.pasteAfterKeys);
 }
 
 /**

@@ -1,0 +1,32 @@
+appId: com.seldom.mdpublisher
+productName: md-publisher
+# asar disabled: the app bundles Playwright, which spawns a driver/child process
+# from its own package files — that fails from inside an asar archive. Loose files
+# also keep src/public and the tray icon directly readable at runtime.
+asar: false
+directories:
+  output: release
+  buildResources: build
+files:
+  - electron/**/*
+  - src/**/*
+  - "!src/**/*.test.js"
+  - package.json
+extraMetadata:
+  main: electron/main.cjs
+win:
+  target:
+    - nsis
+    - portable
+mac:
+  target:
+    - dmg
+  category: public.app-category.productivity
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Utility
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true

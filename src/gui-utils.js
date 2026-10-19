@@ -57,7 +57,7 @@ export function safeStringify(a) {
  * page-load snapshot. Letting clients write it back would clobber a freshly
  * detected login state whenever any unrelated setting is saved.
  */
-export const ALLOWED_SETTINGS_KEYS = ['articleDir', 'defaultPlatforms'];
+export const ALLOWED_SETTINGS_KEYS = ['articleDir', 'defaultPlatforms', 'chromePath'];
 
 /**
  * Merge a client-supplied settings patch onto current settings, whitelisting
@@ -74,6 +74,7 @@ export function sanitizeSettings(current, body) {
     if (!ALLOWED_SETTINGS_KEYS.includes(key)) continue;
     const val = body[key];
     if (key === 'articleDir' && typeof val !== 'string') continue;
+    if (key === 'chromePath' && typeof val !== 'string') continue;
     if (key === 'defaultPlatforms' && !Array.isArray(val)) continue;
     out[key] = val;
   }
