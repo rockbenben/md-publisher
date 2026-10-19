@@ -10,7 +10,7 @@ import { checkbox, input, confirm } from '@inquirer/prompts';
 import { resolve, basename, extname } from 'path';
 import { existsSync, statSync } from 'fs';
 import chalk from 'chalk';
-import { parseArticle, scanArticleDir, ARTICLE_EXTS, loadProjectConfig } from './parser.js';
+import { parseArticle, scanArticleDir, loadProjectConfig } from './parser.js';
 import { closeContext, waitForEnter } from './browser.js';
 import { PLATFORMS } from './config.js';
 

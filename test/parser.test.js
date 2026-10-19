@@ -11,9 +11,68 @@ import {
   firstContentImageSrc,
   scanArticleDir,
   loadProjectConfig,
+  coverFileMeta,
 } from '../src/parser.js';
 
 // ─── parseArticleString ──────────────────────────────────────────────────────
+
+// The frontmatter splitter replaced gray-matter (which pinned an EOL js-yaml@3
+// with an unfixed advisory). These lock in the behaviour it used to provide.
+test('parseArticleString: handles CRLF frontmatter', () => {
+  const a = parseArticleString('---\r\ntitle: CRLF\r\n---\r\nBody line', 'a.md');
+  assert.equal(a.meta.title, 'CRLF');
+  assert.equal(a.content, 'Body line');
+});
+
+test('parseArticleString: tolerates a UTF-8 BOM before the fence', () => {
+  const a = parseArticleString('\uFEFF---\ntitle: BOM\n---\nBody', 'a.md');
+  assert.equal(a.meta.title, 'BOM');
+  assert.equal(a.content, 'Body');
+});
+
+test('parseArticleString: strips a BOM when there is no frontmatter', () => {
+  const a = parseArticleString('\uFEFF# Heading\n\nbody', 'a.md');
+  assert.ok(!a.content.startsWith('\uFEFF'), 'BOM should not survive into content');
+  assert.equal(a.meta.title, 'Heading');
+});
+
+test('parseArticleString: empty frontmatter block yields no metadata', () => {
+  const a = parseArticleString('---\n---\nBody', 'a.md');
+  assert.equal(a.content, 'Body');
+  assert.equal(a.meta.title, '');
+});
+
+test('parseArticleString: closing fence may sit at end of file', () => {
+  const a = parseArticleString('---\ntitle: T\n---', 'a.md');
+  assert.equal(a.meta.title, 'T');
+  assert.equal(a.content, '');
+});
+
+test('parseArticleString: --- inside the body is not a frontmatter fence', () => {
+  const a = parseArticleString('# Doc\n\n---\n\nnot: frontmatter', 'a.md');
+  assert.equal(a.meta.title, 'Doc');
+  assert.ok(a.content.includes('not: frontmatter'), 'body must be preserved');
+});
+
+test('parseArticleString: a --- that never closes is body text', () => {
+  const a = parseArticleString('# Doc\n\n---\ntitle: nope', 'a.md');
+  assert.equal(a.meta.title, 'Doc');
+});
+
+test('parseArticleString: malformed YAML throws so the file is reported, not silently mistitled', () => {
+  assert.throws(
+    () => parseArticleString('---\ntitle: [unclosed\n---\nBody', 'a.md'),
+    /.*/,
+  );
+});
+
+test('parseArticleString: body survives the fence with inner spacing intact', () => {
+  // parseArticleString trims the body (long-standing behaviour), so compare
+  // against what trimming leaves — the point here is that nothing INSIDE the
+  // body is mangled.
+  const a = parseArticleString('---\ntitle: T\n---\n\n  keep  \n\n## H2\n', 'a.md');
+  assert.equal(a.content, 'keep  \n\n## H2');
+});
 
 test('parseArticleString: reads title from frontmatter', () => {
   const a = parseArticleString('---\ntitle: Hello\n---\nBody', 'a.md');
@@ -185,6 +244,29 @@ test('scanArticleDir: recursive flag controls subdirectory descent', () => {
   }
 });
 
+test('scanArticleDir: breaks directory-symlink cycles (no runaway / duplicates)', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'mdpub-cycle-'));
+  try {
+    writeFileSync(join(dir, 'post.md'), '# Post');
+    const sub = join(dir, 'sub');
+    mkdirSync(sub);
+    // A directory symlink pointing back to an ancestor forms a cycle. Without
+    // realpath-based dedup the scanner re-walks the tree until the OS path limit,
+    // listing post.md once per level (duplicates) and re-scanning the subtree.
+    try {
+      symlinkSync(dir, join(sub, 'loop'), process.platform === 'win32' ? 'junction' : 'dir');
+    } catch {
+      return t.skip('symlink creation not permitted in this environment');
+    }
+    let articles;
+    assert.doesNotThrow(() => { articles = scanArticleDir(dir, { recursive: true }); });
+    const posts = articles.filter((a) => a.filePath.endsWith('post.md'));
+    assert.equal(posts.length, 1, 'cycle broken — post.md found exactly once, no duplicates');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('scanArticleDir: skips un-stat-able entries instead of crashing', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'mdpub-dangling-'));
   try {
@@ -252,4 +334,16 @@ test('loadProjectConfig: returns null when no config file present', () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+// ─── coverFileMeta (upload MIME from base64 magic prefix) ────────────────────
+
+const b64 = (hex) => Buffer.from(hex, 'hex').toString('base64');
+
+test('coverFileMeta: detects PNG / JPEG / WEBP / GIF and defaults to JPEG', () => {
+  assert.deepEqual(coverFileMeta(b64('89504e470d0a1a0a')), { mime: 'image/png', name: 'cover.png' });
+  assert.deepEqual(coverFileMeta(b64('ffd8ffe000104a46')), { mime: 'image/jpeg', name: 'cover.jpg' });
+  assert.deepEqual(coverFileMeta(b64('524946460000000057454250')), { mime: 'image/webp', name: 'cover.webp' });
+  assert.deepEqual(coverFileMeta(b64('474946383961')), { mime: 'image/gif', name: 'cover.gif' });
+  // Unknown payload falls back to JPEG (Canvas always emits JPEG)
+  assert.deepEqual(coverFileMeta('Zm9vYmFy'), { mime: 'image/jpeg', name: 'cover.jpg' });
 });

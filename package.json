@@ -2,8 +2,18 @@
   "name": "md-publisher",
   "version": "0.4.0",
   "type": "module",
+  "main": "electron/main.cjs",
   "description": "批量发布 Markdown 文章到多个内容平台",
-  "keywords": ["markdown", "publisher", "batch", "wechat", "zhihu", "sspai", "juejin", "smzdm"],
+  "keywords": [
+    "markdown",
+    "publisher",
+    "batch",
+    "wechat",
+    "zhihu",
+    "sspai",
+    "juejin",
+    "smzdm"
+  ],
   "license": "MIT",
   "engines": {
     "node": ">=18.0.0"
@@ -13,17 +23,31 @@
     "publish": "node src/index.js",
     "gui": "node src/gui.js",
     "web:install": "npm --prefix web install",
+    "web:ci": "npm --prefix web ci",
     "web:dev": "npm --prefix web run dev",
     "web:build": "npm --prefix web run build",
-    "test": "node --test"
+    "test": "node --test",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "check": "npm run lint && npm test",
+    "electron": "electron .",
+    "electron:dev": "npm run web:build && electron .",
+    "dist": "npm run web:build && electron-builder",
+    "test:e2e": "node e2e/electron-smoke.mjs"
   },
   "dependencies": {
     "@inquirer/prompts": "^8.5.2",
-    "chalk": "^5.3.0",
+    "chalk": "^6.0.1",
     "express": "^5.2.1",
-    "gray-matter": "^4.0.3",
-    "js-yaml": "^4.2.0",
+    "js-yaml": "^5.5.0",
     "marked": "^18.0.5",
-    "playwright": "^1.60.0"
+    "playwright": "^1.61.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "electron": "^44.9.0",
+    "electron-builder": "^26.15.3",
+    "eslint": "^10.13.0",
+    "globals": "^17.13.0"
   }
 }

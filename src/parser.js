@@ -1,11 +1,21 @@
-import { readFileSync, readdirSync, statSync, existsSync } from 'fs';
-import { readdir, stat, readFile, access } from 'fs/promises';
+import { readFileSync, readdirSync, statSync, existsSync, realpathSync } from 'fs';
+import { readdir, stat, readFile, access, realpath } from 'fs/promises';
 import { join, extname, basename, resolve, dirname } from 'path';
-import matter from 'gray-matter';
-import yaml from 'js-yaml';
+import { load as loadYaml } from 'js-yaml';
 import { PLATFORMS } from './config.js';
 
-/** Supported article file extensions */
+/**
+ * Supported article file extensions.
+ *
+ * Mirrored in the browser at `web/src/lib/filePicker.ts` (the file picker
+ * filters what the user selects before it is uploaded). The two live in
+ * different processes, so they cannot share an import and must be kept in
+ * step BY HAND — if you add an extension here, add it there too. The lists
+ * differ deliberately in two places: the browser side also skips `.git` /
+ * `.vscode` (this side skips every dot-directory outright), and the browser
+ * side has no need to skip the `.md-publisher.yml` config files because its
+ * extension check already rejects them.
+ */
 export const ARTICLE_EXTS = new Set([
   '.md', '.markdown', '.mdown', '.mkd', '.mkdn', '.mdwn', '.mdx', '.txt',
 ]);
@@ -16,6 +26,59 @@ const SKIP_FILES = new Set(['readme.md', 'changelog.md', 'license.md', 'license.
 
 /** Directories to skip during scan */
 const SKIP_DIRS = new Set(['node_modules', 'user-data']);
+
+/**
+ * Opening fence: `---` must be the very first thing in the file (a leading BOM
+ * is tolerated).
+ */
+const FM_OPEN_RE = /^(?:\uFEFF)?---[ \t]*\r?\n/;
+/**
+ * Closing fence: a bare `---` (or YAML's `...`) on its own line. The `m` flag is
+ * required — without it `^` anchors to the start of the string and a non-empty
+ * frontmatter block would never be found.
+ */
+const FM_CLOSE_RE = /^(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/m;
+
+/**
+ * Split `raw` into YAML frontmatter data and the remaining body.
+ *
+ * Replaces gray-matter, which is unmaintained and pins an EOL js-yaml@3 whose
+ * CLI dependency chain (argparse -> sprintf-js) carries an unfixed DoS advisory
+ * (npm's only "fix" is a semver *downgrade* of gray-matter). We already depend
+ * on js-yaml directly, so the fenced block is read with it instead.
+ *
+ * Malformed YAML throws, matching gray-matter: a file with broken frontmatter
+ * should be reported and skipped, not silently published with dropped metadata.
+ *
+ * @param {string} raw
+ * @returns {{ data: object, content: string, hasFrontmatter: boolean }}
+ */
+function splitFrontmatter(raw) {
+  const text = String(raw);
+  const plain = () => ({
+    data: {}, content: text.replace(/^\uFEFF/, ''), hasFrontmatter: false,
+  });
+
+  const open = text.match(FM_OPEN_RE);
+  if (!open) return plain();
+
+  // Scan for the closing fence line by line rather than with one big regex, so
+  // an EMPTY block (`---\n---\n`) is recognised — that is valid frontmatter
+  // declaring no keys, and the body still has to be extracted.
+  const rest = text.slice(open[0].length);
+  const close = rest.match(FM_CLOSE_RE);
+  if (!close) return plain();
+
+  const yamlBody = rest.slice(0, close.index);
+  // An empty block (`---\n---\n`) declares no keys. js-yaml THROWS on empty
+  // input, so it must not be handed one.
+  const loaded = yamlBody.trim() ? loadYaml(yamlBody) : undefined;
+  return {
+    data: (loaded && typeof loaded === 'object') ? loaded : {},
+    content: rest.slice(close.index + close[0].length),
+    hasFrontmatter: true,
+  };
+}
 
 /**
  * Parse a markdown file, extracting frontmatter metadata and body content.
@@ -35,7 +98,7 @@ export function parseArticle(filePath) {
  * @returns {{ meta: object, content: string, filePath: string }}
  */
 export function parseArticleString(raw, filePath) {
-  const { data, content } = matter(raw);
+  const { data, content } = splitFrontmatter(raw);
 
   // Ensure scalar values — YAML can produce objects/arrays for fields we expect as strings
   const str = (v) => (typeof v === 'string' || typeof v === 'number') ? String(v) : '';
@@ -79,8 +142,13 @@ export function scanArticleDir(dirPath, { recursive = false } = {}) {
   if (!existsSync(dirPath)) return [];
 
   const files = []; // { path, mtimeMs }
+  const seen = new Set(); // real paths already scanned — breaks symlink cycles
 
   function scan(dir) {
+    let real;
+    try { real = realpathSync(dir); } catch { real = dir; }
+    if (seen.has(real)) return;
+    seen.add(real);
     let entries;
     try { entries = readdirSync(dir); } catch { return; }
     for (const entry of entries) {
@@ -124,17 +192,17 @@ const validPlatformIds = new Set(Object.keys(PLATFORMS));
 
 /**
  * Parse raw config file text into a data object.
- * `.md-publisher.yml` is documented as plain YAML, but gray-matter only
- * extracts data from `---`-fenced frontmatter (a plain YAML file yields {}).
- * Support both forms: fenced → gray-matter, plain → js-yaml directly.
+ * `.md-publisher.yml` is documented as plain YAML, but it may also be written
+ * as `---`-fenced frontmatter (a legacy form that must keep loading). Support
+ * both: fenced → frontmatter block, plain → the whole file as YAML.
  * @param {string} raw
  * @returns {object} parsed data (never throws — returns {} on parse error)
  */
 function parseConfigData(raw) {
-  const text = raw.replace(/^﻿/, ''); // strip BOM
   try {
-    if (/^\s*---\r?\n/.test(text)) return matter(text).data || {};
-    const loaded = yaml.load(text);
+    const { data, hasFrontmatter } = splitFrontmatter(raw);
+    if (hasFrontmatter) return data;
+    const loaded = loadYaml(String(raw).replace(/^\uFEFF/, ''));
     return (loaded && typeof loaded === 'object') ? loaded : {};
   } catch {
     return {};
@@ -229,8 +297,13 @@ export async function scanArticleDirAsync(dirPath, { recursive = false } = {}) {
   try { await access(dirPath); } catch { return []; }
 
   const files = []; // { path, mtimeMs }
+  const seen = new Set(); // real paths already scanned — breaks symlink cycles
 
   async function scan(dir) {
+    let real;
+    try { real = await realpath(dir); } catch { real = dir; }
+    if (seen.has(real)) return;
+    seen.add(real);
     let entries;
     try { entries = await readdir(dir); } catch { return; }
     for (const entry of entries) {
