@@ -185,7 +185,13 @@ export default function App() {
   // ---- File intake ----
   const addUploaded = useCallback(
     async (files: PickedFile[], skipped: string[]) => {
-      for (const s of skipped) message.warning(`已跳过过大文件 ${s}`);
+      // One toast for the whole batch: a folder with five oversized files used
+      // to stack five separate warnings on top of each other.
+      if (skipped.length) {
+        const listed = skipped.slice(0, 3).join('、');
+        const rest = skipped.length > 3 ? ` 等 ${skipped.length} 个文件` : '';
+        message.warning(`已跳过 ${listed}${rest}（单个超过 10MB）`);
+      }
       if (!files.length) return;
       try {
         const data = await api.uploadFiles(files);
@@ -218,7 +224,9 @@ export default function App() {
     const r = await pickFolder();
     if (!r) return;
     if (r.emptyDir) {
-      message.error('该目录下没有找到稿件文件');
+      // Same wording as the empty state in the manuscript list — they describe
+      // the same situation and used to say it two different ways.
+      message.error('该目录下没有稿件文件');
       return;
     }
     await addUploaded(r.files, r.skipped);
@@ -448,7 +456,7 @@ export default function App() {
       setIsPublishing(d.publishing);
     },
     progress: (d) =>
-      setProgressText(`正在发布 (${d.articleIndex + 1}/${d.articleCount})：${d.title}`),
+      setProgressText(`正在发布（${d.articleIndex + 1}/${d.articleCount}）：${d.title}`),
     platform: (d) =>
       setDispatch((prev) => ({
         ...prev,
@@ -458,13 +466,19 @@ export default function App() {
         },
       })),
     done: (d) => {
+      // One result per (article, platform) pair — the old wording said just
+      // 「N 成功」, which left the reader guessing what the number counted, and
+      // 「成功」claimed more than the tool does: it fills editors, the publish
+      // click is still the user's.
       const ok = d.results.filter((r) => r.success).length;
       const fail = d.results.length - ok;
-      if (fail === 0) message.success(`发布完成：${ok} 成功`);
-      else message.error(`发布完成：${ok} 成功，${fail} 失败`);
+      if (fail === 0) message.success(`发布完成：${ok} 处已填好，请到各平台确认后点「发布」`);
+      else message.error(`发布完成：${ok} 处已填好，${fail} 处失败，详见下方日志`);
     },
     cancelled: () => {
-      message.error('发布已取消');
+      // A cancel is the user's own action, and the preceding toast already
+      // announced it as info — escalating to error contradicts both.
+      message.info('发布已取消');
       setDispatch((prev) => {
         const next = { ...prev };
         for (const k of Object.keys(next)) if (next[k].status === 'running') delete next[k];
@@ -514,6 +528,7 @@ export default function App() {
             onPickFolder={onPickFolder}
             onAddPath={onAddPath}
             onRemoveManual={removeManual}
+            onOpenSettings={() => setTab('settings')}
           />
 
           <Destinations

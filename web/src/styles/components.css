@@ -196,6 +196,13 @@
 .manuscript--sel:hover {
   background: var(--seal-wash);
 }
+/* The row is tabbable and Space/Enter toggle it, so it MUST show where focus
+   is. Negative offset: the row spans the full card width, and the list clips
+   horizontally at the edges. */
+.manuscript:focus-visible {
+  outline: 2px solid var(--cinnabar);
+  outline-offset: -2px;
+}
 .manuscript__body {
   flex: 1;
   min-width: 0;
@@ -250,6 +257,15 @@
   opacity: 0.4;
   cursor: not-allowed;
 }
+/* Icon buttons carry no text of their own — without a ring a keyboard user
+   cannot tell where they are, and their labels live only in a tooltip. */
+.manuscript__remove:focus-visible,
+.dest__open:focus-visible,
+.meta__exit:focus-visible,
+.dir-modal__nav:focus-visible {
+  outline: 2px solid var(--cinnabar);
+  outline-offset: 2px;
+}
 .manuscript__cover {
   display: block;
   width: 72px;
@@ -298,6 +314,11 @@
   align-items: center;
   gap: 9px;
 }
+/* Shared by the manuscript rows and the platform cards: one selection mark,
+   drawn in the same square/stamp language as the rest of the UI. Previously
+   the rows used an antd Checkbox and the cards this one, so the two selection
+   surfaces in the same screen did not match. */
+.tick,
 .dest__tick {
   width: 15px;
   height: 15px;
@@ -306,10 +327,12 @@
   position: relative;
   transition: all 0.12s;
 }
+.tick--on,
 .dest__tick--on {
   background: var(--cinnabar);
   border-color: var(--cinnabar);
 }
+.tick--on::after,
 .dest__tick--on::after {
   content: '';
   position: absolute;
@@ -668,6 +691,10 @@
   background: var(--seal-wash);
   color: var(--cinnabar-deep);
 }
+.dir-item:focus-visible {
+  outline: 2px solid var(--cinnabar);
+  outline-offset: -2px;
+}
 .dir-item__icon {
   color: var(--amber);
 }
@@ -675,10 +702,14 @@
   margin-left: auto;
   color: var(--rule-strong);
   font-size: 11px;
-  opacity: 0;
+  /* Not hover-only: keyboard users never trigger :hover and touch users get no
+     hover state at all, so the "this opens" affordance was invisible to both. */
+  opacity: 0.4;
   transition: opacity 0.12s;
 }
-.dir-item:hover .dir-item__enter {
+.dir-item:hover .dir-item__enter,
+.dir-item:focus-visible .dir-item__enter,
+.dir-item--active .dir-item__enter {
   opacity: 1;
 }
 .dir-modal__foot {

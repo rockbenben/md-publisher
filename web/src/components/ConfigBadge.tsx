@@ -30,6 +30,12 @@ export default function ConfigBadge({
           标签 {config.tag.map((t) => <Tag key={t}>{t}</Tag>)}
         </span>
       ) : null}
+      {/* Platforms above are actually applied to the selection; 分类 and 标签
+          are only printed as a reminder (the settings screen says so too), and
+          rendering them as bare tags made them look equally actionable. */}
+      {(config.category?.length || config.tag?.length) && (
+        <span style={{ marginLeft: 'auto', color: 'var(--ink-faint)' }}>分类与标签仅作提示，不会自动填写</span>
+      )}
     </div>
   );
 }

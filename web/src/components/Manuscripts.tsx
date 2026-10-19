@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Button, Checkbox, Empty, Input, Tooltip } from 'antd';
+import { Button, Empty, Input, Tooltip } from 'antd';
 import {
   CloseOutlined,
   FileAddOutlined,
@@ -25,6 +25,7 @@ export default function Manuscripts({
   onPickFolder,
   onAddPath,
   onRemoveManual,
+  onOpenSettings,
 }: {
   articles: Article[];
   selected: Set<string>;
@@ -39,6 +40,7 @@ export default function Manuscripts({
   onPickFolder: () => void;
   onAddPath: (path: string) => Promise<boolean>;
   onRemoveManual: (filePath: string) => void;
+  onOpenSettings: () => void;
 }) {
   const [path, setPath] = useState('');
   const [adding, setAdding] = useState(false);
@@ -65,8 +67,8 @@ export default function Manuscripts({
             {/* 「取消」reads as "abort", not "deselect", and it sits right next to
                 「清空」which removes the rows themselves — the pair that actually
                 needs to be legible is 全选 / 全不选. */}
-            <button onClick={onSelectAll} disabled={disabled}>全选</button>
-            <button onClick={onDeselectAll} disabled={disabled}>全不选</button>
+            <button onClick={onSelectAll} disabled={disabled || !articles.length}>全选</button>
+            <button onClick={onDeselectAll} disabled={disabled || !articles.length}>全不选</button>
             <button onClick={onClear} disabled={disabled}>清空列表</button>
             <button onClick={onRefresh} disabled={disabled}>
               <ReloadOutlined /> 刷新
@@ -90,7 +92,7 @@ export default function Manuscripts({
           disabled={disabled || adding}
           style={{ fontFamily: 'var(--font-mono)' }}
         />
-        <Button type="primary" icon={<PlusOutlined />} onClick={submitPath} disabled={disabled} loading={adding}>
+        <Button type="primary" icon={<PlusOutlined />} onClick={submitPath} disabled={disabled || !path.trim()} loading={adding}>
           添加
         </Button>
       </div>
@@ -102,10 +104,16 @@ export default function Manuscripts({
             image={Empty.PRESENTED_IMAGE_SIMPLE}
             description={
               hasDir
-                ? '该目录下没有稿件文件（支持 .md .markdown .txt 等）'
+                ? '该目录下没有稿件文件（支持 .md .markdown .txt 等 8 种扩展名）'
                 : '在「设置」里配置默认目录，或在上方添加文件 / 路径'
             }
-          />
+          >
+            {!hasDir && (
+              /* The empty state tells you to go to 设置 but offered no way to
+                 get there — the only route was the tab two rows up. */
+              <Button onClick={onOpenSettings}>去设置里配置目录</Button>
+            )}
+          </Empty>
         ) : (
           <AnimatePresence initial={false}>
             {articles.map((a, i) => {
@@ -132,13 +140,12 @@ export default function Manuscripts({
                   }}
                   onClick={() => !disabled && onToggle(a.filePath)}
                 >
-                  <Checkbox
-                    checked={sel}
-                    disabled={disabled}
-                    aria-label={`选择 ${a.title}`}
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={() => onToggle(a.filePath)}
-                  />
+                  {/* A decorative mark, not a control: the row itself carries
+                      role=checkbox / aria-checked and handles Space+Enter. The
+                      antd Checkbox that used to sit here was a second checkbox
+                      nested inside the first — announced as "checkbox, checkbox"
+                      and adding a redundant tab stop to every row. */}
+                  <span className={`tick${sel ? ' tick--on' : ''}`} aria-hidden />
                   {a.cover && (
                     <img
                       className="manuscript__cover"

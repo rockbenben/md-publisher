@@ -76,7 +76,7 @@ export default function DirBrowserModal({
         </button>
       </div>
 
-      <div className="dir-modal__list">
+      <div className="dir-modal__list" role="listbox" aria-label="目录">
         {error ? (
           <div className="dir-modal__empty">{error}</div>
         ) : entries.length === 0 ? (
@@ -86,12 +86,39 @@ export default function DirBrowserModal({
             <div
               key={e.path}
               className={`dir-item${picked === e.path ? ' dir-item--active' : ''}`}
+              role="option"
+              aria-selected={picked === e.path}
+              tabIndex={0}
               onClick={() => setPicked(e.path)}
               onDoubleClick={() => load(e.path)}
+              // File-manager keys: Enter/Space pick the folder (what a single
+              // click does), Right descends, Left goes back up. The list was
+              // previously mouse-only — no tabIndex, no keys, and the only way
+              // in was a double-click or an arrow that only appeared on hover.
+              onKeyDown={(ev) => {
+                if (ev.key === 'Enter' || ev.key === ' ') {
+                  ev.preventDefault();
+                  setPicked(e.path);
+                } else if (ev.key === 'ArrowRight') {
+                  ev.preventDefault();
+                  load(e.path);
+                } else if (ev.key === 'ArrowLeft') {
+                  ev.preventDefault();
+                  load(parent || '');
+                }
+              }}
             >
               <FolderFilled className="dir-item__icon" />
               <span>{e.name}</span>
-              <RightOutlined className="dir-item__enter" onClick={(ev) => { ev.stopPropagation(); load(e.path); }} />
+              {/* Clickable for the mouse, hidden from assistive tech: the row
+                  above exposes the same action as ArrowRight, and a second tab
+                  stop per folder would make a long listing unusable by
+                  keyboard. */}
+              <RightOutlined
+                className="dir-item__enter"
+                aria-hidden
+                onClick={(ev) => { ev.stopPropagation(); load(e.path); }}
+              />
             </div>
           ))
         )}

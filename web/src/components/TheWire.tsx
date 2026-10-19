@@ -72,7 +72,11 @@ export default function TheWire({
       />
       <div className="wire-panel">
         <div className="wire-panel__rail" aria-hidden />
-        <div className="wire-panel__body" ref={bodyRef} onScroll={onScroll} role="log" aria-label="发布日志" aria-live="polite">
+        {/* aria-live="off" on purpose: a publish run pushes hundreds of lines in
+            a few minutes and every one would be announced, burying whatever the
+            reader was actually saying. Errors and completion already surface as
+            toasts, so this stays a transcript to read on demand. */}
+        <div className="wire-panel__body" ref={bodyRef} onScroll={onScroll} role="log" aria-label="发布日志" aria-live="off">
           {logs.length === 0 ? (
             <div className="wire-panel__idle">暂无日志 · 发布过程会实时显示在这里</div>
           ) : (

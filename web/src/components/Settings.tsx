@@ -27,10 +27,10 @@ export default function Settings({
       transition={{ duration: 0.25 }}
       style={{ marginTop: 26 }}
     >
-      <SectionLabel cn="默认文章目录" en="ARTICLE FOLDER" />
+      <SectionLabel cn="默认稿件目录" en="ARTICLE FOLDER" />
       <div className="settings-card sheet">
         <p className="settings-card__hint">
-          启动时自动扫描该目录下的稿件（.md .markdown .txt 等），并读取目录内的{' '}
+          启动时自动扫描该目录下的稿件（.md .markdown .mdown .mkd .mkdn .mdwn .mdx .txt），并读取目录内的{' '}
           <code>.md-publisher.yml</code> 预设发布平台。分类与标签只作为提示输出，不会自动填写。
         </p>
         <div className="addbar" style={{ marginBottom: 0 }}>
