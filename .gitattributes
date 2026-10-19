@@ -1,9 +1,14 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
-# The built GUI HTML is emitted by Vite with LF. Pin it to LF so rebuilds on a
-# Windows/CRLF checkout don't churn line endings. Only the text entry point
-# needs this; do NOT glob src/public/** (it would mis-treat binary assets).
+# Vite rewrites most of the HTML entry point but passes untouched elements
+# through verbatim, line endings included. Under * text=auto alone a Windows
+# checkout hands web/index.html CRLF; one CRLF survives into the built
+# src/public/index.html, and the pin below then reports that file as
+# permanently modified. Pin the input to LF so the emitted output is LF.
+# Only the entry point needs this: do NOT glob web/** (web/public/** holds
+# .ico/.png assets copied byte-for-byte) or src/public/** (same reason).
+web/index.html text eol=lf
 src/public/index.html text eol=lf
 
 # Bundled binaries must never be eol-normalized.
