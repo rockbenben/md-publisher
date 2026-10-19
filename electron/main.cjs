@@ -1,4 +1,4 @@
-const { app, BrowserWindow, utilityProcess, dialog, Menu, shell } = require('electron');
+const { app, BrowserWindow, utilityProcess, dialog, Menu, shell, session } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const http = require('node:http');
@@ -20,6 +20,8 @@ let windowCreated = false;
 // collected, which silently removes the icon from the system tray.
 let tray = null;
 let restartTimer = null;
+// Bounded renderer-crash recovery; see the render-process-gone handler.
+let rendererDeaths = 0;
 const policy = createRestartPolicy();
 app.isQuitting = false;
 
@@ -127,6 +129,12 @@ function createWindow() {
     minWidth: 960,
     minHeight: 640,
     title: 'md-publisher',
+    // Electron 44 window-state persistence. With a unique `name`, bounds and
+    // display mode are saved on quit and restored next launch. Without it the
+    // window snaps back to the sizes below on every launch, throwing away the
+    // user's resize — those values then only apply on first run.
+    name: 'md-publisher-main',
+    windowStatePersistence: true,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -153,6 +161,22 @@ function createWindow() {
   win.webContents.on('will-navigate', (event, url) => {
     if (url !== APP_URL && !url.startsWith(APP_URL)) event.preventDefault();
   });
+  // The server child is independent of the renderer, so a crashed renderer is
+  // recoverable with a reload. Without this the tray app keeps running with a
+  // permanently blank window and no hint that anything went wrong. Bounded
+  // like the server supervisor — a renderer that dies on every load would
+  // otherwise spin forever.
+  win.webContents.on('render-process-gone', (_event, details) => {
+    writeLog(`renderer gone: reason=${details.reason} exitCode=${details.exitCode}\n`);
+    if (details.reason === 'clean-exit' || app.isQuitting) { rendererDeaths = 0; return; }
+    if (++rendererDeaths > 3) {
+      rendererDeaths = 0;
+      dialog.showErrorBox('md-publisher', `界面反复崩溃（${details.reason}），已停止自动重载。可从托盘菜单重试，详情见日志。\n\n日志：${logFilePath() || '不可用'}`);
+      return;
+    }
+    if (win && !win.isDestroyed()) { win.show(); win.reload(); }
+  });
+  win.webContents.on('did-finish-load', () => { rendererDeaths = 0; });
   win.on('close', (e) => {
     if (!app.isQuitting) { e.preventDefault(); win.hide(); }
   });
@@ -223,6 +247,12 @@ function startServer() {
 
 function start() {
   initLog();
+  // The UI is a local SPA that only talks to 127.0.0.1 over HTTP; it never asks
+  // for camera, microphone, geolocation or notifications. Denying by default
+  // means a compromised renderer gets nothing. The file/folder pickers use the
+  // File System Access API, which is driven by a user gesture and does not go
+  // through the permissions API, so they keep working.
+  session.defaultSession.setPermissionRequestHandler((_wc, _permission, cb) => cb(false));
   startServer();
   // Fallback: if no 'listening' arrives within 20s, probe over HTTP (with the
   // handshake token) before creating the window.
@@ -248,6 +278,9 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
+  // Windows uses this id for taskbar grouping and toast identity. Left unset the
+  // app is grouped as plain Electron and its notifications carry no identity.
+  app.setAppUserModelId('com.seldom.mdpublisher');
   app.whenReady().then(start);
   // Stay alive in the tray when the window is closed (all platforms).
   app.on('window-all-closed', () => { /* no-op: tray keeps the app running */ });
