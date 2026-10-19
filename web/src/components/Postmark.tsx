@@ -1,11 +1,11 @@
 import { useId } from 'react';
 import { motion } from 'motion/react';
 
-type Variant = 'logomark' | 'published' | 'failed';
+type Variant = 'published' | 'failed';
 
 interface PostmarkProps {
   variant: Variant;
-  /** Ring text — e.g. platform name. Logomark ignores this. */
+  /** Ring text — e.g. platform name. */
   label?: string;
   /** Center line — e.g. the publish timestamp. */
   sub?: string;
@@ -16,9 +16,9 @@ interface PostmarkProps {
 }
 
 /**
- * 朱砂印章 — the cinnabar publish stamp.
- * Doubles as the brand logomark (static, center 邮) and the per-platform
- * "published / failed" confirmation that stamps onto a platform card.
+ * 朱砂印章 — the cinnabar publish stamp, pressed onto a platform card when
+ * the article lands. This is a *status*; the app's identity is
+ * {@link BrandMark}, which is a different shape entirely.
  */
 export default function Postmark({
   variant,
@@ -39,11 +39,9 @@ export default function Postmark({
   const ringPath = `M50,50 m 0,-${ringR} a ${ringR},${ringR} 0 1,1 0,${2 * ringR} a ${ringR},${ringR} 0 1,1 0,-${2 * ringR}`;
 
   const ringText =
-    variant === 'logomark'
-      ? 'MD·PUBLISHER ★ 多平台发布 ★ '
-      : variant === 'published'
-        ? `${label} ★ 已发布 PUBLISHED ★ `
-        : `${label} ★ 失败 FAILED ★ `;
+    variant === 'published'
+      ? `${label} ★ 已发布 PUBLISHED ★ `
+      : `${label} ★ 失败 FAILED ★ `;
 
   const svg = (
     <svg
@@ -51,11 +49,7 @@ export default function Postmark({
       width={size}
       height={size}
       role="img"
-      aria-label={
-        variant === 'logomark'
-          ? 'md-publisher 印章'
-          : `${label} ${variant === 'published' ? '已发布' : '失败'}`
-      }
+      aria-label={`${label} ${variant === 'published' ? '已发布' : '失败'}`}
       style={{ display: 'block', overflow: 'visible' }}
     >
       <defs>
@@ -85,45 +79,28 @@ export default function Postmark({
           </textPath>
         </text>
 
-        {variant === 'logomark' ? (
+        {/* Cancellation waves — the bars a postmark drags across a stamp */}
+        {[40, 47, 54, 61].map((y) => (
+          <path
+            key={y}
+            d={`M28,${y} q5.5,-3.5 11,0 t11,0 t11,0`}
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          />
+        ))}
+        {sub && (
           <text
             x="50"
-            y="50"
+            y="72"
             textAnchor="middle"
-            dominantBaseline="central"
-            fontFamily="var(--font-display)"
-            fontSize="26"
-            fontWeight="700"
+            fontFamily="var(--font-mono)"
+            fontSize="6"
+            fontWeight="600"
             stroke="none"
           >
-            邮
+            {sub}
           </text>
-        ) : (
-          <>
-            {/* Cancellation waves — the bars a postmark drags across a stamp */}
-            {[40, 47, 54, 61].map((y) => (
-              <path
-                key={y}
-                d={`M28,${y} q5.5,-3.5 11,0 t11,0 t11,0`}
-                fill="none"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-            ))}
-            {sub && (
-              <text
-                x="50"
-                y="72"
-                textAnchor="middle"
-                fontFamily="var(--font-mono)"
-                fontSize="6"
-                fontWeight="600"
-                stroke="none"
-              >
-                {sub}
-              </text>
-            )}
-          </>
         )}
       </g>
     </svg>

@@ -1,6 +1,6 @@
 import { GithubOutlined, PoweroffOutlined } from '@ant-design/icons';
 import { motion } from 'motion/react';
-import Postmark from './Postmark';
+import BrandMark from './BrandMark';
 
 type Tab = 'publish' | 'settings';
 
@@ -21,7 +21,7 @@ export default function Masthead({
     <header className="masthead">
       <div className="masthead__top">
         <div className="masthead__brand">
-          <Postmark variant="logomark" size={52} rotate={-7} />
+          <BrandMark size={52} />
           <div>
             <div className="brand__word">md-publisher</div>
             <div className="brand__tag">一稿多发 · Markdown 多平台发布工具</div>
@@ -58,14 +58,28 @@ export default function Masthead({
         transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
       />
 
-      <nav className="nav" role="tablist">
-        {(['publish', 'settings'] as Tab[]).map((t) => (
+      <nav className="nav" role="tablist" aria-label="主视图切换">
+        {(['publish', 'settings'] as Tab[]).map((t, i, all) => (
           <button
             key={t}
+            id={`tab-${t}`}
             role="tab"
             aria-selected={tab === t}
+            aria-controls={`panel-${t}`}
+            // A tablist is a single tab stop; arrows move between its tabs.
+            // Without this both buttons land in the tab order and the pattern
+            // is only half-implemented.
+            tabIndex={tab === t ? 0 : -1}
             className={`nav__tab${tab === t ? ' nav__tab--active' : ''}`}
             onClick={() => onTab(t)}
+            onKeyDown={(e) => {
+              const dir = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+              if (!dir) return;
+              e.preventDefault();
+              const next = all[(i + dir + all.length) % all.length];
+              onTab(next);
+              document.getElementById(`tab-${next}`)?.focus();
+            }}
           >
             {t === 'publish' ? '发 布' : '设 置'}
           </button>

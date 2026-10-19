@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<style>
+  /* Fraunces must be the `full` subset, not the app's `latin-wght` one: the
+     card sets font-variation-settings opsz/SOFT/WONK, and only the `full`
+     file carries those axes. Swapping in the wght-only file (36KB vs 118KB)
+     silently drops them — the wordmark renders wider and wraps onto two lines.
+     Verified by rendering, not by reading the spec. */
+  @font-face { font-family:'Fraunces'; src:url('fonts/fraunces-latin-full-normal.woff2') format('woff2'); font-weight:100 900; font-display:block; }
+  @font-face { font-family:'Hanken Grotesk'; src:url('fonts/hanken-grotesk-latin-wght-normal.woff2') format('woff2'); font-weight:100 900; font-display:block; }
+  @font-face { font-family:'IBM Plex Mono'; src:url('fonts/ibm-plex-mono-latin-500-normal.woff2') format('woff2'); font-weight:500; font-display:block; }
+  @font-face { font-family:'IBM Plex Mono'; src:url('fonts/ibm-plex-mono-latin-600-normal.woff2') format('woff2'); font-weight:600; font-display:block; }
+
+  :root{
+    --paper:#F6F1E7; --ink:#1C1A17; --inkSoft:#5C564C; --inkFaint:#6A6354;
+    --rule:#DAD2C2; --cinnabar:#C23B2E; --cinnabarDeep:#9E2D22;
+    --display:'Fraunces','Songti SC','SimSun','Noto Serif CJK SC',serif;
+    --ui:'Hanken Grotesk','PingFang SC','Microsoft YaHei',sans-serif;
+    --mono:'IBM Plex Mono',ui-monospace,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  /* GitHub 的社交预览槽位规格 1280×640；此前的 1200×630 是想当然定的。 */
+  body{width:1280px;height:640px;background:var(--paper);overflow:hidden;}
+  .card{position:relative;width:1280px;height:640px;
+    background:radial-gradient(120% 140% at 18% 28%, #FBF7EE 0%, var(--paper) 55%, #F0EADC 100%);}
+  .frame{position:absolute;inset:32px;border:1px solid var(--rule);}
+  .frame::after{content:"";position:absolute;inset:7px;border:1px solid rgba(218,210,194,0.55);}
+
+  .eyebrow{position:absolute;top:62px;left:82px;font-family:var(--mono);font-weight:600;font-size:15px;
+    letter-spacing:.26em;color:var(--inkFaint);text-transform:uppercase;}
+  .foot{position:absolute;bottom:60px;font-family:var(--mono);font-weight:500;font-size:15px;
+    letter-spacing:.12em;color:var(--inkFaint);}
+  .foot.l{left:82px;} .foot.r{right:82px;}
+  .foot .red{color:var(--cinnabarDeep);}
+
+  /* hero：logo —— 一枚稿，压出多个去向 */
+  .stage{position:absolute;left:84px;top:172px;width:360px;height:360px;
+    filter:drop-shadow(0 12px 24px rgba(158,45,34,0.16));}
+  .stage svg{width:360px;height:360px;display:block;}
+
+  .content{position:absolute;left:520px;top:162px;right:82px;}
+  .wordmark{font-family:var(--display);font-variation-settings:'opsz' 144,'SOFT' 0,'WONK' 1;
+    font-weight:560;font-size:108px;line-height:.96;color:var(--ink);letter-spacing:-.012em;}
+  .wordmark .dash{color:var(--cinnabar);}
+  .tagline{margin-top:20px;font-family:var(--display);font-variation-settings:'opsz' 80,'WONK' 0;
+    font-weight:480;font-size:41px;line-height:1.1;color:var(--ink);}
+  .tagline em{font-style:normal;color:var(--cinnabarDeep);}
+
+  /* 一句话说清它替人做了什么、以及它不做什么 */
+  .sub{margin-top:16px;font-family:var(--ui);font-weight:420;font-size:22px;line-height:1.55;
+    color:var(--inkSoft);max-width:678px;}
+  .sub b{font-weight:600;color:var(--ink);}
+
+  .platforms{margin-top:34px;display:flex;align-items:center;gap:22px;}
+  .platforms .lbl{font-family:var(--mono);font-weight:600;font-size:12.5px;letter-spacing:.22em;
+    color:var(--inkFaint);text-transform:uppercase;border-right:1px solid var(--rule);padding-right:20px;}
+  .platforms img{height:34px;width:34px;object-fit:contain;border-radius:3px;filter:saturate(.92);}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="frame"></div>
+    <div class="eyebrow">Markdown · 一稿多发</div>
+
+    <div class="stage">
+      <!-- 与 brand/logo.svg 同一枚印：左侧带留白的方印＝稿，右侧三块＝去向 -->
+      <svg viewBox="0 0 100 100">
+        <defs>
+          <filter id="ink" x="-20%" y="-20%" width="140%" height="140%">
+            <feTurbulence type="fractalNoise" baseFrequency="0.72" numOctaves="2" seed="7" result="n"/>
+            <feDisplacementMap in="SourceGraphic" in2="n" scale="1.15" xChannelSelector="R" yChannelSelector="G"/>
+          </filter>
+        </defs>
+        <g fill="#C23B2E">
+          <rect x="6" y="27" width="46" height="46" rx="4" transform="rotate(-3 29 50)" filter="url(#ink)"/>
+          <rect x="64" y="6"  width="32" height="27" rx="3.5" transform="rotate(-5 80 19.5)"/>
+          <rect x="64" y="36" width="32" height="27" rx="3.5" transform="rotate(1.5 80 49.5)" opacity=".86"/>
+          <rect x="64" y="66" width="32" height="27" rx="3.5" transform="rotate(6 80 79.5)" opacity=".72"/>
+        </g>
+        <g fill="#F6F1E7" transform="rotate(-3 29 50)">
+          <rect x="15" y="38" width="28" height="5" rx="2.5"/>
+          <rect x="15" y="48" width="28" height="5" rx="2.5"/>
+          <rect x="15" y="58" width="17" height="5" rx="2.5"/>
+        </g>
+      </svg>
+    </div>
+
+    <div class="content">
+      <div class="wordmark">md<span class="dash">-</span>publisher</div>
+      <div class="tagline">Markdown <em>一稿多发</em></div>
+      <div class="sub">写一次，自动填充到 6 个内容平台 —— <b>最后点「发布」永远由你</b>。</div>
+      <div class="platforms">
+        <span class="lbl">发布平台</span>
+        <img src="icons/sspai.ico" alt="少数派"/>
+        <img src="icons/zhihu.ico" alt="知乎"/>
+        <img src="icons/wechat.png" alt="公众号"/>
+        <img src="icons/smzdm.ico" alt="什么值得买"/>
+        <img src="icons/juejin.svg" alt="掘金"/>
+        <img src="icons/x.png" alt="X"/>
+      </div>
+    </div>
+
+    <div class="foot l">本地运行 · 文章不出本机 · MIT 开源</div>
+    <div class="foot r">github.com/rockbenben/<span class="red">md-publisher</span></div>
+  </div>
+</body>
+</html>

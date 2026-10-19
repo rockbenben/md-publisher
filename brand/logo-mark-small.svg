@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="md-publisher">
+  <title>md-publisher</title>
+  <!--
+    Small-size mark (favicon, the 16/32px .ico entries, tray).
+
+    Same composition as logo.svg with two things removed, both for legibility at
+    16px rather than for looks:
+
+      · the ruled interior — at 16px three 5-unit bars collapse into a ragged
+        notch and the chop stops reading as paper;
+      · the rotation and ink filter — sub-pixel jitter just turns the edges grey.
+
+    What is left is the part that survives: one block, three blocks.
+  -->
+  <g fill="#C23B2E">
+    <rect x="7" y="29" width="44" height="42" rx="4"/>
+    <rect x="64" y="8"  width="31" height="26" rx="3.5"/>
+    <rect x="64" y="37" width="31" height="26" rx="3.5" opacity=".86"/>
+    <rect x="64" y="66" width="31" height="26" rx="3.5" opacity=".72"/>
+  </g>
+</svg>
