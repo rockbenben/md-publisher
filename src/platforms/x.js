@@ -3,7 +3,7 @@ import { resolve, dirname, join } from 'path';
 import { tmpdir } from 'os';
 import chalk from 'chalk';
 import { marked } from 'marked';
-import { PLATFORMS, TIMEOUTS } from '../config.js';
+import { PLATFORMS } from '../config.js';
 import { withPage, ensureLoggedIn, pasteHtml, findElement, fillTitle } from '../browser.js';
 import { preprocessCallouts, stripFirstImage } from '../parser.js';
 
@@ -58,7 +58,10 @@ export function parseSegments(markdown, filePath) {
   markdown = normalizeHeadings(markdown);
   const lines = markdown.split('\n');
   const imgRegex = /^\s*!\[([^\]]*)\]\(([^)]+)\)\s*$/;
-  const codeStartRegex = /^```(\w*)\s*$/;
+  // ``` + language word, optionally followed by an info string (e.g. ```js {1,2}
+  // or ```ts title="x"). Capture only the lang; ignore the rest. The `\s.*`
+  // tail keeps a 4-backtick line (````) from matching as a fence open.
+  const codeStartRegex = /^```(\w*)(?:\s.*)?$/;
   const articleDir = filePath ? dirname(filePath) : process.cwd();
 
   const segments = [];
@@ -131,13 +134,33 @@ async function downloadToTemp(url, tempDir) {
   try {
     const res = await fetch(url);
     if (!res.ok) return null;
-    const contentType = (res.headers.get('content-type') || 'image/png').split(';')[0];
-    const ext = MIME_EXTS[contentType] || '.png';
-    const tempPath = join(tempDir, `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`);
+    const contentType = (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    // Trust the bytes over the header. A server can answer
+    // `application/octet-stream` for a JPEG (very common behind CDNs); saving
+    // those bytes under a guessed extension gives the uploader a file whose type
+    // does not match its name, which it rejects with an opaque error.
     const buf = Buffer.from(await res.arrayBuffer());
+    const ext = MIME_EXTS[contentType] || sniffImageExt(buf);
+    if (!ext) return null; // not an image we can hand to the upload dialog
+    const tempPath = join(tempDir, `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`);
     await writeFile(tempPath, buf);
     return tempPath;
   } catch { return null; }
+}
+
+/** Identify an image by its magic bytes; null when it is not a known format. */
+export function sniffImageExt(buf) {
+  if (!buf || buf.length < 12) return null;
+  if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return '.jpg';       // JPEG
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return '.png';  // PNG
+  if (buf.slice(0, 4).toString('ascii') === 'RIFF' && buf.slice(8, 12).toString('ascii') === 'WEBP') return '.webp';
+  if (buf.slice(0, 3).toString('ascii') === 'GIF') return '.gif';
+  if (buf.slice(4, 8).toString('ascii') === 'ftyp') return '.avif';                 // ISO-BMFF (avif/heic)
+  // SVG is text and may sit behind an XML prolog, DOCTYPE or comments, so look
+  // for the root element rather than only the very first bytes. Binary image
+  // formats are extremely unlikely to contain "<svg" in their first 512 bytes.
+  if (buf.slice(0, 512).toString('utf-8').includes('<svg')) return '.svg';
+  return null;
 }
 
 /**
@@ -228,17 +251,36 @@ async function insertImage(page, filePath) {
       { timeout: 15000 }
     );
   } catch {}
+
+  // Verify the image actually landed. Every step above swallows its own
+  // timeout, so without this the function returns "success" even when the
+  // dialog was renamed / never applied / inserted nothing. The caller records
+  // the image in `uploadedMarkers`, and replaceMarkers pairs images to markers
+  // BY POSITION — a phantom success therefore shifts every later image into the
+  // wrong slot and deletes a marker block. Throwing instead lets the caller's
+  // catch() drop just this image and keeps the rest aligned.
+  const imgCountAfter = await page.evaluate(() =>
+    document.querySelectorAll('.public-DraftEditor-content img').length
+  ).catch(() => 0);
+  if (imgCountAfter <= imgCountBefore) {
+    throw new Error('图片未插入编辑器（对话框未应用或图片被拒绝）');
+  }
+
   await page.waitForTimeout(500);
 }
 
 /**
  * Reorder DraftJS blocks: move image atomic blocks from the end
  * to replace marker blocks at their correct positions.
+ *
+ * `editorSelector` must be the selector that actually matched in Phase 1 —
+ * hardcoding one root here would make this report `no editor` whenever only a
+ * fallback selector had matched, even though the paste succeeded.
  */
-async function replaceMarkers(page, codeBlocks, uploadedMarkers = []) {
-  return await page.evaluate(({ codeBlocks, uploadedMarkers, IMG_M, CODE_M, M_END }) => {
+async function replaceMarkers(page, codeBlocks, uploadedMarkers = [], editorSelector = '[data-testid="composer"]') {
+  return await page.evaluate(({ codeBlocks, uploadedMarkers, editorSelector, IMG_M, CODE_M, M_END }) => {
     try {
-      const editorEl = document.querySelector('[data-testid="composer"]');
+      const editorEl = document.querySelector(editorSelector);
       if (!editorEl) return { ok: false, error: 'no editor' };
 
       const fk = Object.keys(editorEl).find(k => k.startsWith('__reactFiber'));
@@ -300,8 +342,20 @@ async function replaceMarkers(page, codeBlocks, uploadedMarkers = []) {
         });
       });
 
-      // First uploaded image ends up last in DraftJS (cursor stays before it);
-      // rotate so mediaBlocks[0] = first uploaded image
+      // Restore upload order.
+      //
+      // INVARIANT: DraftJS appends each uploaded image at the cursor, and the
+      // cursor sits BEFORE the previously inserted one — so the document ends
+      // up [img1, img2, …, imgN, img0]: the FIRST uploaded image is last, the
+      // rest keep upload order. Moving that last element to the front is
+      // therefore a single `unshift(pop())`, correct for any N.
+      //
+      // Provenance: this is the behaviour the module has always assumed (see
+      // the pre-rotation comment and the test model), and the n=3 cases in
+      // test/x-replace-markers.test.js now pin it so a change to either the
+      // assumption or this line fails loudly. It has NOT been re-confirmed
+      // against X's live editor — if DraftJS ever appends in order, or fully
+      // reverses, this line must change with it.
       if (mediaBlocks.length > 1) mediaBlocks.unshift(mediaBlocks.pop());
 
       // Map each image marker NUMBER to its uploaded media block.
@@ -363,7 +417,7 @@ async function replaceMarkers(page, codeBlocks, uploadedMarkers = []) {
     } catch (err) {
       return { ok: false, error: err.message };
     }
-  }, { codeBlocks, uploadedMarkers, IMG_M: IMG_MARKER_PREFIX, CODE_M: CODE_MARKER_PREFIX, M_END: MARKER_SUFFIX });
+  }, { codeBlocks, uploadedMarkers, editorSelector, IMG_M: IMG_MARKER_PREFIX, CODE_M: CODE_MARKER_PREFIX, M_END: MARKER_SUFFIX });
 }
 
 // ─── Main Publish Flow ──────────────────────────────────────────────────────
@@ -394,7 +448,7 @@ export async function publish(article, options = {}) {
       console.log(chalk.yellow('   ⚠ 未找到撰写按钮'));
     }
 
-    let filledContent = false;
+    let filledContent;
     let insertedImages = 0;
     let failedSegments = 0;
 
@@ -510,8 +564,9 @@ export async function publish(article, options = {}) {
       await page.waitForTimeout(2000);
     }
     // Run whenever there is anything to place OR a leftover marker to clean up.
+    let markerFailed = false;
     if (insertedImages > 0 || codeBlocks.length > 0 || images.length > 0) {
-      const result = await replaceMarkers(page, codeBlocks, uploadedMarkers);
+      const result = await replaceMarkers(page, codeBlocks, uploadedMarkers, editorEl.selector);
       if (result.ok) {
         const moved = [];
         if (result.movedImages > 0) moved.push(`${result.movedImages} 张图片`);
@@ -519,6 +574,12 @@ export async function publish(article, options = {}) {
         if (result.droppedImages > 0) moved.push(`清理 ${result.droppedImages} 个失败图片占位`);
         if (moved.length) console.log(chalk.green(`   ✓ 已定位 ${moved.join(' + ')}`));
       } else {
+        // Remember the failure: when positioning fails the literal
+        // `___IMG_n___` / `___CODE_n___` markers are still sitting in the
+        // document and every image is still bunched at the end. Reporting
+        // success here would tell the user the article is ready to publish
+        // when it visibly is not.
+        markerFailed = true;
         console.log(chalk.yellow(`   ⚠ 内容定位失败: ${result.error}`));
       }
     }
@@ -566,9 +627,14 @@ export async function publish(article, options = {}) {
       codeBlocks.length > 0 && `${codeBlocks.length}个代码块`,
       setCover && '封面',
     ].filter(Boolean);
-    const failNote = failedSegments > 0 ? `（${failedSegments} 项失败）` : '';
+    const notes = [];
+    if (failedSegments > 0) notes.push(`${failedSegments} 项失败`);
+    if (markerFailed) notes.push('占位符定位失败，请检查正文中的 ___IMG_/___CODE_ 残留');
+    const failNote = notes.length ? `（${notes.join('，')}）` : '';
     const message = parts.length ? `已填充${parts.join('、')}${failNote}` : '未能自动填充';
-    return { success: parts.length > 0, platform: config.name, message };
+    // A positioning failure means the document still contains the raw markers,
+    // so the article is NOT ready to publish regardless of what got filled.
+    return { success: parts.length > 0 && !markerFailed, platform: config.name, message };
     } finally {
       // Remove the whole temp dir (and everything in it) — covers both the
       // images downloaded in Phase 0 and the Phase-4 cover image, which was

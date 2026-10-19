@@ -104,7 +104,7 @@ export async function publish(article, options = {}) {
   let converterPage = null;
   let wechatPage = null;
   let editorPage = null;
-  let coverB64 = null;
+  let coverB64;
 
   try {
     // ============================================================
