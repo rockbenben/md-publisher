@@ -1,10 +1,11 @@
-const { app, BrowserWindow, utilityProcess, dialog, Menu, shell, session } = require('electron');
+const { app, BrowserWindow, utilityProcess, dialog, Menu, shell, session, Notification } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const http = require('node:http');
 const crypto = require('node:crypto');
 const { createRestartPolicy } = require('./supervisor.cjs');
 const { buildTray } = require('./tray.cjs');
+const { checkForUpdate } = require('./update-check.cjs');
 
 const SERVER = path.join(__dirname, '..', 'src', 'gui.js');
 const PORT = Number(process.env.PORT) || 9870;
@@ -20,6 +21,7 @@ let windowCreated = false;
 // collected, which silently removes the icon from the system tray.
 let tray = null;
 let restartTimer = null;
+let updateTimer = null;
 // Bounded renderer-crash recovery; see the render-process-gone handler.
 let rendererDeaths = 0;
 const policy = createRestartPolicy();
@@ -69,11 +71,16 @@ function clearRestartTimer() {
   if (restartTimer) { clearTimeout(restartTimer); restartTimer = null; }
 }
 
+function clearUpdateTimer() {
+  if (updateTimer) { clearTimeout(updateTimer); updateTimer = null; }
+}
+
 function quitApp() {
   app.isQuitting = true;
   // Never let a pending supervised respawn fire after we decided to quit — it
   // would fork a child that outlives the app and keeps holding the port.
   clearRestartTimer();
+  clearUpdateTimer();
   let called = false;
   const done = () => { if (called) return; called = true; try { app.quit(); } catch {} };
   if (serverProc) {
@@ -107,6 +114,34 @@ function openLogFile() {
     return;
   }
   shell.openPath(p);
+}
+
+// One unauthenticated GET to the GitHub API; nothing about the user is sent.
+// Announced, never applied — see update-check.cjs for why.
+async function notifyUpdate() {
+  const info = await checkForUpdate();
+  if (!info || !info.newer) return;
+  const n = new Notification({
+    title: 'md-publisher 有新版本',
+    body: `v${info.latest} 已发布（当前 v${info.current}）。点击前往下载页。`,
+  });
+  n.on('click', () => { shell.openExternal(info.url); });
+  n.show();
+}
+
+// Tray menu path: always reports an outcome, including "could not reach
+// GitHub", so a silent click is never mistaken for "already up to date".
+async function manualUpdateCheck() {
+  const info = await checkForUpdate();
+  const newer = info && info.newer;
+  const options = newer
+    ? { type: 'info', message: `发现新版本 v${info.latest}`,
+        detail: `当前 v${info.current}。是否打开下载页？`,
+        buttons: ['打开下载页', '稍后'], defaultId: 0, cancelId: 1 }
+    : { type: 'info', message: '已是最新版本',
+        detail: info ? `当前 v${info.current}。` : '未能连接 GitHub，请稍后再试。' };
+  const result = win ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options);
+  if (newer && result.response === 0) shell.openExternal(info.url);
 }
 
 function createWindow() {
@@ -264,12 +299,19 @@ function start() {
       dialog.showErrorBox('md-publisher', `服务启动超时，请查看日志文件：\n${logFilePath() || '（日志目录不可用）'}`);
     }
   });
+  // Check once, well after startup: the window must never wait on the
+  // network, and a failure here is never worth surfacing. Skipped in dev
+  // so running from source does not nag about the published release.
+  if (app.isPackaged) {
+    updateTimer = setTimeout(() => { updateTimer = null; notifyUpdate(); }, 15000);
+  }
   tray = buildTray({
     onShow: () => { if (win) { win.show(); win.focus(); } },
     onReload: reloadWindow,
     onRestartServer: restartServer,
     onCloseBrowser: postCloseBrowser,
     onOpenLog: openLogFile,
+    onCheckUpdate: manualUpdateCheck,
     onQuit: quitApp,
   });
 }
@@ -288,6 +330,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', () => {
     app.isQuitting = true;
     clearRestartTimer();
+    clearUpdateTimer();
     // Drop the tray icon explicitly instead of waiting for process teardown.
     try { tray?.destroy(); } catch { /* already gone */ }
     tray = null;

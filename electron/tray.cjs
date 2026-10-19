@@ -1,7 +1,7 @@
 const { Tray, Menu, nativeImage } = require('electron');
 const path = require('node:path');
 
-function buildTray({ onShow, onReload, onRestartServer, onCloseBrowser, onOpenLog, onQuit }) {
+function buildTray({ onShow, onReload, onRestartServer, onCloseBrowser, onOpenLog, onCheckUpdate, onQuit }) {
   // Bundled inside the app (electron/**) so it exists at runtime in the packaged
   // build — build/icon.png is a buildResource and is NOT shipped. Tray icons are
   // small (16px, 32px @2x); Electron auto-loads the @2x variant for HiDPI.
@@ -15,6 +15,7 @@ function buildTray({ onShow, onReload, onRestartServer, onCloseBrowser, onOpenLo
     { label: '重启服务', click: onRestartServer },
     { label: '关闭浏览器', click: onCloseBrowser },
     { label: '打开日志文件', click: onOpenLog },
+    { label: '检查更新', click: onCheckUpdate },
     { type: 'separator' },
     { label: '退出', click: onQuit },
   ]));
