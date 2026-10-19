@@ -10,18 +10,29 @@
   --paper-sunken: #efe8d8;
   --ink: #1c1a17;
   --ink-soft: #5c564c;
-  --ink-faint: #8a8276;
+  /* Contrast floors (WCAG AA), measured with relative-luminance:
+       --ink-faint   5.29:1 on paper, 4.72:1 on a seal-washed row (10.5–18px text)
+       --verdigris   4.69:1 on a seal-washed card — the "已登录" line passes
+                    even in the selected state
+       --amber       3.24:1 worst case — NON-TEXT only (the folder glyph)
+       --slug-faint  4.81:1 on --slug-bg (log timestamps)
+     CAUTION on the seal-wash rows: --seal-wash is rgba(194,59,46,0.08), so the
+     number above assumes it composites over paper / paper-raised. Over
+     --paper-sunken it drops to 4.37 and --ink-faint would fail AA. That is why
+     `.manuscript--sel:hover` and `.dir-item--active` REPLACE the :hover
+     paper-sunken rather than stacking on it — keep it that way. */
+  --ink-faint: #6a6354;
   --rule: #dad2c2;
   --rule-strong: #c8bda6;
   --cinnabar: #c23b2e;
   --cinnabar-deep: #9e2d22;
   --seal-wash: rgba(194, 59, 46, 0.08);
-  --amber: #c9a14b;
+  --amber: #9d781d;
   --airmail: #2e5077;
-  --verdigris: #3f7a4e;
+  --verdigris: #36703f;
   --slug-bg: #191714;
   --slug-fg: #e8e1d2;
-  --slug-faint: #7d7768;
+  --slug-faint: #8b8474;
 
   /* Type roles — bundled Latin/mono + system CJK (no webfont for CJK) */
   --font-display: 'Fraunces Variable', 'Fraunces', 'Songti SC', 'Noto Serif CJK SC',

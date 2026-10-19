@@ -34,11 +34,11 @@ const clock = (sec: boolean) => {
 function readCoverPrefs() {
   try {
     const raw = JSON.parse(localStorage.getItem('coverSettings') || 'null');
-    if (raw) return { autoCover: raw.autoCover !== false, removeCoverImg: raw.removeCoverImg !== false };
+    if (raw) return { autoCover: raw.autoCover === true, removeCoverImg: raw.removeCoverImg !== false };
   } catch {
     /* ignore */
   }
-  return { autoCover: true, removeCoverImg: true };
+  return { autoCover: false, removeCoverImg: true };
 }
 
 export default function App() {
@@ -52,6 +52,7 @@ export default function App() {
   const [selectedPlatforms, setSelectedPlatforms] = useState<Set<string>>(new Set());
   const [settings, setSettings] = useState<SettingsT>({});
   const [articleDir, setArticleDir] = useState('');
+  const [chromePath, setChromePath] = useState('');
   const [projectConfig, setProjectConfig] = useState<ProjectConfig | null>(null);
   const [loginStatus, setLoginStatus] = useState<Record<string, LoginStatus>>({});
   const [loginChecking, setLoginChecking] = useState(false);
@@ -65,6 +66,10 @@ export default function App() {
   const logId = useRef(0);
   const wasPublishing = useRef(false);
   const platformSaveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // Guards against out-of-order /api/articles replies: two overlapping
+  // refreshes (init racing a fast 刷新 click) would otherwise let the slower
+  // response win and overwrite the newer list, selection and project config.
+  const refreshSeq = useRef(0);
   // Sync guard against rapid double-click before React re-renders isPublishing.
   const pendingPublish = useRef(false);
   const today = useMemo(() => {
@@ -86,21 +91,28 @@ export default function App() {
 
   // ---- Logging ----
   const appendLog = useCallback((text: string, level?: 'error') => {
+    // Allocate the id OUTSIDE the updater: React re-invokes updaters (StrictMode
+    // double-invokes in dev), so mutating the ref inside it would advance the
+    // counter twice per line.
+    const id = logId.current++;
+    const time = clock(true);
     setLogs((prev) => {
-      const next = [...prev, { id: logId.current++, time: clock(true), text, level }];
+      const next = [...prev, { id, time, text, level }];
       return next.length > MAX_LOG_LINES ? next.slice(next.length - MAX_LOG_LINES) : next;
     });
   }, []);
 
   // ---- Articles ----
   const refreshArticles = useCallback(
-    async (dir: string, opts: { quiet?: boolean } = {}) => {
+    async (dir: string, opts: { quiet?: boolean; preserveSelection?: boolean } = {}) => {
+      const seq = ++refreshSeq.current;
       setProjectConfig(null);
       let scanned: Article[] = [];
       let cfg: ProjectConfig | null = null;
       if (dir) {
         try {
           const data = await api.getArticles(dir);
+          if (seq !== refreshSeq.current) return; // a newer refresh superseded us
           if (data.error) {
             message.error(data.error);
           } else {
@@ -108,19 +120,32 @@ export default function App() {
             cfg = data.projectConfig ?? null;
           }
         } catch {
+          if (seq !== refreshSeq.current) return;
           message.error('加载稿件失败');
         }
       }
-      // Drop manual entries the directory scan now also provides, then
-      // re-select everything currently in view.
+      // Drop manual entries the directory scan now also provides.
       const dirPaths = new Set(scanned.map((a) => a.filePath));
       const keptManual = manualArticles.filter((a) => !dirPaths.has(a.filePath));
 
       setDirArticles(scanned);
       setManualArticles(keptManual);
       setProjectConfig(cfg);
-      if (cfg?.platforms) setSelectedPlatforms(new Set(cfg.platforms));
-      setSelected(new Set([...scanned, ...keptManual].map((a) => a.filePath)));
+
+      if (opts.preserveSelection) {
+        // A manual 刷新 must not undo the user's choices — re-selecting
+        // everything here would silently re-check articles the user unchecked,
+        // and re-applying the project config would revert platform toggles the
+        // user just made (and that togglePlatform has already persisted).
+        // Keep the selection, minus anything no longer on the list.
+        const visible = new Set([...scanned, ...keptManual].map((a) => a.filePath));
+        setSelected((prev) => new Set([...prev].filter((fp) => visible.has(fp))));
+      } else {
+        // Fresh load (first run, or after switching directory): apply the
+        // project config's defaults and select everything currently in view.
+        if (cfg?.platforms) setSelectedPlatforms(new Set(cfg.platforms));
+        setSelected(new Set([...scanned, ...keptManual].map((a) => a.filePath)));
+      }
 
       if (!opts.quiet && dir && scanned.length > 0) {
         message.success(
@@ -141,6 +166,7 @@ export default function App() {
         const s = await api.getSettings();
         setSettings(s);
         setArticleDir(s.articleDir || '');
+        setChromePath(s.chromePath || '');
         if (s.defaultPlatforms) setSelectedPlatforms(new Set(s.defaultPlatforms));
         if (s.loginStatus) setLoginStatus({ ...s.loginStatus });
         await refreshArticles(s.articleDir || '', { quiet: true });
@@ -148,8 +174,13 @@ export default function App() {
         message.error('初始化失败: ' + (err as Error).message);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Runs once on mount by design: refreshArticles is intentionally not a dep
+    // (it changes with manualArticles and would re-run the whole init).
   }, []);
+
+  // Drop any pending debounced settings write when the tree goes away, so it
+  // can't fire into an unmounted app.
+  useEffect(() => () => clearTimeout(platformSaveTimer.current), []);
 
   // ---- File intake ----
   const addUploaded = useCallback(
@@ -321,8 +352,8 @@ export default function App() {
     try {
       await api.cancelPublish();
       message.info('正在取消发布…');
-    } catch {
-      message.error('取消请求失败');
+    } catch (err) {
+      message.error('取消请求失败: ' + (err as Error).message);
     }
   }, [message]);
 
@@ -381,7 +412,7 @@ export default function App() {
       // Send only the field this screen owns. The server merges onto persisted
       // settings, so resending the stale local `settings` here would clobber
       // `defaultPlatforms` (owned by the debounced togglePlatform save).
-      const saved = await api.saveSettings({ articleDir: dir });
+      const saved = await api.saveSettings({ articleDir: dir, chromePath: chromePath.trim() });
       setSettings(saved);
       message.success('设置已保存');
       setTab('publish');
@@ -389,7 +420,7 @@ export default function App() {
     } catch (err) {
       message.error('设置保存失败: ' + (err as Error).message);
     }
-  }, [articleDir, message, refreshArticles]);
+  }, [articleDir, chromePath, message, refreshArticles]);
 
   const onClearDir = useCallback(async () => {
     setArticleDir('');
@@ -462,11 +493,10 @@ export default function App() {
       />
 
       {tab === 'publish' ? (
-        <>
+        <div role="tabpanel" id="panel-publish" aria-labelledby="tab-publish">
           <ProgressBanner
             visible={isPublishing}
             text={progressText}
-            canCancel={isPublishing}
             onCancel={onCancel}
           />
 
@@ -479,7 +509,7 @@ export default function App() {
             onSelectAll={selectAll}
             onDeselectAll={deselectAll}
             onClear={clearAll}
-            onRefresh={() => !isPublishing && refreshArticles(settings.articleDir || '')}
+            onRefresh={() => !isPublishing && refreshArticles(settings.articleDir || '', { preserveSelection: true })}
             onPickFiles={onPickFiles}
             onPickFolder={onPickFolder}
             onAddPath={onAddPath}
@@ -514,15 +544,19 @@ export default function App() {
           />
 
           <TheWire logs={logs} onClear={() => setLogs([])} />
-        </>
+        </div>
       ) : (
-        <Settings
-          articleDir={articleDir}
-          onChange={setArticleDir}
-          onBrowse={() => setDirModalOpen(true)}
-          onClear={onClearDir}
-          onSave={onSaveSettings}
-        />
+        <div role="tabpanel" id="panel-settings" aria-labelledby="tab-settings">
+          <Settings
+            articleDir={articleDir}
+            onChange={setArticleDir}
+            onBrowse={() => setDirModalOpen(true)}
+            onClear={onClearDir}
+            chromePath={chromePath}
+            onChromePathChange={setChromePath}
+            onSave={onSaveSettings}
+          />
+        </div>
       )}
 
       <DirBrowserModal

@@ -97,7 +97,12 @@ export default function Destinations({
                     <span className="dest__login dest__login--out">未登录</span>
                   )
                 ) : (
-                  <span className="dest__login dest__login--unknown">未检测登录</span>
+                  // 「未检测」rather than 「未检测登录」: the other two states are
+                  // already about logging in, so the third reads as a third
+                  // login outcome instead of "nobody has checked yet".
+                  <span className="dest__login dest__login--unknown" title="尚未检测登录状态">
+                    未检测
+                  </span>
                 )}
               </div>
 

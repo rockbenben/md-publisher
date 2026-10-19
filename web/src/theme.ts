@@ -2,7 +2,7 @@ import type { ThemeConfig } from 'antd';
 
 // --- Palette mirrored from web/src/styles/global.css.
 // Single dominant neutral (warm paper + ink) with one sharp accent (cinnabar).
-export const C = {
+const C = {
   paper: '#F6F1E7',
   paperRaised: '#FCFAF3',
   ink: '#1C1A17',
@@ -80,8 +80,10 @@ export const theme: ThemeConfig = {
       borderRadius: 2,
     },
     Message: {
-      contentBg: C.ink,
-      colorText: C.paper,
+      // Light raised paper with the default ink text. antd v6 Message has no
+      // per-component text-color token, so a dark contentBg left the text
+      // unreadable (dark-on-dark). Keep the bg light so text stays legible.
+      contentBg: C.paperRaised,
       borderRadiusLG: 2,
     },
     Tag: {

@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useRef } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
+import { VerticalAlignBottomOutlined } from '@ant-design/icons';
 import type { LogEntry } from '../api/types';
 import SectionLabel from './SectionLabel';
 
@@ -26,18 +27,37 @@ export default function TheWire({
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
+  // A publish run can run for minutes. Once the reader scrolls up to read an
+  // error, the auto-follow stops — and without a marker they have no idea lines
+  // are piling up unseen below the fold.
+  const [hasNew, setHasNew] = useState(false);
 
   // Stay pinned to the bottom unless the user has scrolled up to read.
   const onScroll = () => {
     const el = bodyRef.current;
     if (!el) return;
     pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    if (pinned.current) setHasNew(false);
   };
 
   useEffect(() => {
     const el = bodyRef.current;
-    if (el && pinned.current) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    if (pinned.current) {
+      el.scrollTop = el.scrollHeight;
+      setHasNew(false);
+    } else {
+      setHasNew(true);
+    }
   }, [logs]);
+
+  const jumpToLatest = () => {
+    const el = bodyRef.current;
+    if (!el) return;
+    pinned.current = true;
+    el.scrollTop = el.scrollHeight;
+    setHasNew(false);
+  };
 
   return (
     <section style={{ marginTop: 28 }}>
@@ -54,7 +74,7 @@ export default function TheWire({
         <div className="wire-panel__rail" aria-hidden />
         <div className="wire-panel__body" ref={bodyRef} onScroll={onScroll} role="log" aria-label="发布日志" aria-live="polite">
           {logs.length === 0 ? (
-            <div className="wire-panel__idle">— 暂无日志 · 发布过程将实时显示于此 —</div>
+            <div className="wire-panel__idle">暂无日志 · 发布过程会实时显示在这里</div>
           ) : (
             logs.map((l) => (
               <div key={l.id} className={`wire-line${l.level === 'error' ? ' wire-line--err' : ''}`}>
@@ -64,6 +84,11 @@ export default function TheWire({
             ))
           )}
         </div>
+        {hasNew && (
+          <button className="wire-jump" onClick={jumpToLatest}>
+            <VerticalAlignBottomOutlined /> 有新日志，回到底部
+          </button>
+        )}
       </div>
     </section>
   );

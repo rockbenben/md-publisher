@@ -26,6 +26,7 @@ export interface ProjectConfig {
 export interface Settings {
   articleDir?: string;
   defaultPlatforms?: string[];
+  chromePath?: string;
   loginStatus?: Record<string, LoginStatus>;
 }
 
@@ -44,12 +45,6 @@ export interface BrowseDirResult {
   current: string;
   parent?: string;
   error?: string;
-}
-
-export interface PublishResult {
-  success: boolean;
-  platform: string;
-  message?: string;
 }
 
 /** Per-platform dispatch state shown on the destination cards + postmark. */

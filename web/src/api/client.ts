@@ -1,5 +1,7 @@
-// Thin typed wrappers over the existing REST endpoints. No behavior change —
-// same routes, same payloads as the original src/public/index.html client.
+// Thin typed wrappers over the REST endpoints in src/gui.js — that file is the
+// contract, not this one. The server answers some failures with a populated
+// `error` field on a 2xx/4xx body (e.g. a scan that found nothing), so those
+// wrappers deliberately skip jsonOrThrow and let the caller read `.error`.
 import type {
   Article,
   BrowseDirResult,
@@ -76,7 +78,9 @@ export const api = {
   },
 
   async cancelPublish(): Promise<void> {
-    await fetch('/api/cancel-publish', { method: 'POST' });
+    // Must check res.ok: the server answers 400 when nothing is running, and a
+    // silent success here would tell the user a cancel is under way when none is.
+    await jsonOrThrow(await postJson('/api/cancel-publish', {}));
   },
 
   async closeBrowser(): Promise<Response> {
@@ -96,21 +100,3 @@ export const api = {
   },
 };
 
-export const ARTICLE_EXTS = [
-  '.md',
-  '.markdown',
-  '.mdown',
-  '.mkd',
-  '.mkdn',
-  '.mdwn',
-  '.mdx',
-  '.txt',
-];
-export const SKIP_FILES = new Set([
-  'readme.md',
-  'changelog.md',
-  'license.md',
-  'license.txt',
-]);
-export const SKIP_DIRS = new Set(['node_modules', 'user-data', '.git', '.vscode']);
-export const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per file

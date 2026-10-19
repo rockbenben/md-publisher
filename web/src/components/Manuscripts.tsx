@@ -62,9 +62,12 @@ export default function Manuscripts({
         en="MANUSCRIPTS"
         action={
           <div className="kicker__actions">
+            {/* 「取消」reads as "abort", not "deselect", and it sits right next to
+                「清空」which removes the rows themselves — the pair that actually
+                needs to be legible is 全选 / 全不选. */}
             <button onClick={onSelectAll} disabled={disabled}>全选</button>
-            <button onClick={onDeselectAll} disabled={disabled}>取消</button>
-            <button onClick={onClear} disabled={disabled}>清空</button>
+            <button onClick={onDeselectAll} disabled={disabled}>全不选</button>
+            <button onClick={onClear} disabled={disabled}>清空列表</button>
             <button onClick={onRefresh} disabled={disabled}>
               <ReloadOutlined /> 刷新
             </button>
@@ -99,8 +102,8 @@ export default function Manuscripts({
             image={Empty.PRESENTED_IMAGE_SIMPLE}
             description={
               hasDir
-                ? '该目录下没有找到稿件（.md .markdown .txt 等）'
-                : '在「设置」配置默认目录，或在上方添加文件 / 路径'
+                ? '该目录下没有稿件文件（支持 .md .markdown .txt 等）'
+                : '在「设置」里配置默认目录，或在上方添加文件 / 路径'
             }
           />
         ) : (
@@ -116,11 +119,23 @@ export default function Manuscripts({
                   exit={{ opacity: 0, height: 0 }}
                   transition={{ duration: 0.22, delay: Math.min(i * 0.018, 0.25) }}
                   className={`manuscript${sel ? ' manuscript--sel' : ''}`}
+                  role="checkbox"
+                  aria-checked={sel}
+                  aria-disabled={disabled}
+                  tabIndex={disabled ? -1 : 0}
+                  onKeyDown={(e) => {
+                    if (disabled) return;
+                    if (e.key === ' ' || e.key === 'Enter') {
+                      e.preventDefault();
+                      onToggle(a.filePath);
+                    }
+                  }}
                   onClick={() => !disabled && onToggle(a.filePath)}
                 >
                   <Checkbox
                     checked={sel}
                     disabled={disabled}
+                    aria-label={`选择 ${a.title}`}
                     onClick={(e) => e.stopPropagation()}
                     onChange={() => onToggle(a.filePath)}
                   />
@@ -129,6 +144,11 @@ export default function Manuscripts({
                       className="manuscript__cover"
                       src={a.cover}
                       alt=""
+                      // Covers are arbitrary remote URLs from article frontmatter.
+                      // Scanning an untrusted folder would otherwise send the
+                      // user's IP (and page URL) to whoever authored the file.
+                      referrerPolicy="no-referrer"
+                      loading="lazy"
                       onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
                     />
                   )}
@@ -138,7 +158,16 @@ export default function Manuscripts({
                     </Tooltip>
                     <div className="manuscript__path">
                       {a.fileName}
-                      {a.description ? `  —  ${a.description.slice(0, 60)}` : ''}
+                      {a.description && (
+                        <>
+                          {'  —  '}
+                          {/* Ellipsis only when actually cut: a bare slice ending
+                              mid-word reads as a rendering fault, not a truncation. */}
+                          {a.description.length > 60
+                            ? `${a.description.slice(0, 60)}…`
+                            : a.description}
+                        </>
+                      )}
                     </div>
                   </div>
                   {a.date && <span className="manuscript__date">{a.date}</span>}

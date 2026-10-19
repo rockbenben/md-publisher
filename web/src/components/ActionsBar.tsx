@@ -51,7 +51,7 @@ export default function ActionsBar({
       <div className="actions__spacer" />
 
       <div className="options">
-        <Tooltip title="少数派 / 知乎 / X 自动确认封面">
+        <Tooltip title="带裁剪步骤的平台（少数派 / 微信 / 什么值得买 / X）自动确认封面裁剪；知乎、掘金直接上传，不受影响">
           <label className="option">
             <Switch size="small" checked={autoCover} onChange={onAutoCover} /> 封面自动确认
           </label>

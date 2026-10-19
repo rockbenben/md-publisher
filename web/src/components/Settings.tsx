@@ -8,12 +8,16 @@ export default function Settings({
   onChange,
   onBrowse,
   onClear,
+  chromePath,
+  onChromePathChange,
   onSave,
 }: {
   articleDir: string;
   onChange: (v: string) => void;
   onBrowse: () => void;
   onClear: () => void;
+  chromePath: string;
+  onChromePathChange: (v: string) => void;
   onSave: () => void;
 }) {
   return (
@@ -27,7 +31,7 @@ export default function Settings({
       <div className="settings-card sheet">
         <p className="settings-card__hint">
           启动时自动扫描该目录下的稿件（.md .markdown .txt 等），并读取目录内的{' '}
-          <code>.md-publisher.yml</code> 预设平台、分类与标签。
+          <code>.md-publisher.yml</code> 预设发布平台。分类与标签只作为提示输出，不会自动填写。
         </p>
         <div className="addbar" style={{ marginBottom: 0 }}>
           <Input
@@ -44,11 +48,31 @@ export default function Settings({
             清除
           </Button>
         </div>
-        <div style={{ marginTop: 16 }}>
-          <Button type="primary" icon={<SaveOutlined />} onClick={onSave}>
-            保存
-          </Button>
+      </div>
+
+      <div style={{ marginTop: 22 }}>
+        <SectionLabel cn="浏览器路径" en="BROWSER PATH" />
+        <div className="settings-card sheet">
+          <p className="settings-card__hint">
+            留空则自动检测系统的 Chromium 内核浏览器（Chrome / Edge / Brave / Vivaldi / 360 / QQ 等）。
+            若用其他浏览器或安装在非标准路径，填其可执行文件的绝对路径即可。
+          </p>
+          <Input
+            value={chromePath}
+            onChange={(e) => onChromePathChange(e.target.value)}
+            onPressEnter={onSave}
+            placeholder="留空自动检测；例如：C:\Program Files\Google\Chrome\Application\chrome.exe"
+            style={{ fontFamily: 'var(--font-mono)' }}
+          />
         </div>
+      </div>
+
+      <div style={{ marginTop: 16 }}>
+        {/* Say what the one button saves — both fields are one form, and Enter in
+            either of them saves both. */}
+        <Button type="primary" icon={<SaveOutlined />} onClick={onSave}>
+          保存设置
+        </Button>
       </div>
     </motion.div>
   );

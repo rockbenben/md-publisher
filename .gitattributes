@@ -1,2 +1,13 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# The built GUI HTML is emitted by Vite with LF. Pin it to LF so rebuilds on a
+# Windows/CRLF checkout don't churn line endings. Only the text entry point
+# needs this; do NOT glob src/public/** (it would mis-treat binary assets).
+src/public/index.html text eol=lf
+
+# Bundled binaries must never be eol-normalized.
+*.woff  binary
+*.woff2 binary
+*.png   binary
+*.ico   binary

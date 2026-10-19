@@ -5,12 +5,10 @@ import { AnimatePresence, motion } from 'motion/react';
 export default function ProgressBanner({
   visible,
   text,
-  canCancel,
   onCancel,
 }: {
   visible: boolean;
   text: string;
-  canCancel: boolean;
   onCancel: () => void;
 }) {
   return (
@@ -27,7 +25,9 @@ export default function ProgressBanner({
             <LoadingOutlined />
           </span>
           <span className="progress__text">{text || '正在发布…'}</span>
-          <Button danger size="small" disabled={!canCancel} onClick={onCancel}>
+          {/* The banner only exists while publishing, so cancelling is always
+              available here — a separate canCancel flag was always true. */}
+          <Button danger size="small" onClick={onCancel}>
             取消
           </Button>
         </motion.div>

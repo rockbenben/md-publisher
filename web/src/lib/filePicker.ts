@@ -1,4 +1,31 @@
-import { ARTICLE_EXTS, MAX_FILE_SIZE, SKIP_DIRS, SKIP_FILES } from '../api/client';
+// Which files count as articles, and which to leave alone.
+//
+// These mirror the backend's own lists in `src/parser.js` (ARTICLE_EXTS,
+// SKIP_FILES, SKIP_DIRS) and the size cap in `src/gui.js` (MAX_FILE_SIZE).
+// The browser and the server run in different processes, so the lists cannot
+// share an import — they must be kept in step BY HAND. They were living in
+// `api/client.ts`, which this file imported them from; that put file-picking
+// rules in the HTTP layer, where nothing used them.
+//
+// The two lists are not identical, and do not need to be:
+//   · SKIP_FILES — the backend also skips `.md-publisher.yml` / `.yaml`, but
+//     those are not article extensions here, so the extension check rejects
+//     them anyway.
+//   · SKIP_DIRS — this side additionally lists `.git` / `.vscode`; the backend
+//     skips every dot-directory outright.
+export const ARTICLE_EXTS = [
+  '.md',
+  '.markdown',
+  '.mdown',
+  '.mkd',
+  '.mkdn',
+  '.mdwn',
+  '.mdx',
+  '.txt',
+];
+export const SKIP_FILES = new Set(['readme.md', 'changelog.md', 'license.md', 'license.txt']);
+export const SKIP_DIRS = new Set(['node_modules', 'user-data', '.git', '.vscode']);
+export const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per file
 
 export interface PickedFile {
   name: string;

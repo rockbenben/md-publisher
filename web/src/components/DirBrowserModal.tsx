@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Modal } from 'antd';
 import { ArrowUpOutlined, DesktopOutlined, FolderFilled, RightOutlined } from '@ant-design/icons';
 import { api } from '../api/client';
@@ -19,16 +19,36 @@ export default function DirBrowserModal({
   const [parent, setParent] = useState('');
   const [entries, setEntries] = useState<DirEntry[]>([]);
   const [picked, setPicked] = useState('');
+  const [error, setError] = useState('');
+  // Rapid clicks (a folder then 上一级) can land responses out of order; without
+  // this the stale reply wins and the breadcrumb points at the wrong directory.
+  const seq = useRef(0);
 
   const load = useCallback(async (path: string) => {
+    const mine = ++seq.current;
     try {
       const data = await api.browseDir(path);
+      if (mine !== seq.current) return;
+      // A bad path comes back as HTTP 400 with a populated `error`. Must be
+      // checked here: otherwise a nonexistent directory is indistinguishable
+      // from a genuinely empty one, and `current` would still name the bad
+      // path, letting the user confirm it as the article directory.
+      if (data.error) {
+        setError(data.error);
+        setEntries([]);
+        setPicked('');
+        return;
+      }
+      setError('');
       setCurrent(data.current || '');
       setParent(data.parent || '');
       setEntries(data.entries || []);
       setPicked(data.current || '');
-    } catch {
+    } catch (err) {
+      if (mine !== seq.current) return;
+      setError((err as Error).message || '读取目录失败');
       setEntries([]);
+      setPicked('');
     }
   }, []);
 
@@ -57,7 +77,9 @@ export default function DirBrowserModal({
       </div>
 
       <div className="dir-modal__list">
-        {entries.length === 0 ? (
+        {error ? (
+          <div className="dir-modal__empty">{error}</div>
+        ) : entries.length === 0 ? (
           <div className="dir-modal__empty">空目录</div>
         ) : (
           entries.map((e) => (

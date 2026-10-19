@@ -28,9 +28,11 @@ export default defineConfig({
     port: 5173,
     // Dev proxy: forward REST + SSE to the running `npm run gui` server.
     // (Icons are served directly from publicDir in dev.)
+    // 127.0.0.1 rather than `localhost`: the server binds that literal, so this
+    // avoids depending on how the host resolves to ::1 vs 127.0.0.1.
     proxy: {
       '/api': {
-        target: 'http://localhost:9870',
+        target: 'http://127.0.0.1:9870',
         changeOrigin: true,
       },
     },

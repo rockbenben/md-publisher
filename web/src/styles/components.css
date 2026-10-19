@@ -60,7 +60,7 @@
 }
 .wire__dot--on {
   background: var(--verdigris);
-  box-shadow: 0 0 7px rgba(63, 122, 78, 0.6);
+  box-shadow: 0 0 7px rgba(54, 112, 63, 0.6); /* rgb of --verdigris */
 }
 .meta__link {
   color: var(--ink-soft);
@@ -551,6 +551,33 @@
 .wire-panel__idle {
   color: var(--slug-faint);
   letter-spacing: 0.04em;
+}
+/* Shown only while the reader is scrolled up and lines are arriving below. */
+.wire-jump {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 1px solid #4a4438;
+  border-radius: 999px;
+  background: #241f19;
+  color: var(--slug-fg);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+}
+.wire-jump:hover {
+  border-color: var(--cinnabar);
+}
+.wire-jump:focus-visible {
+  outline: 2px solid var(--cinnabar);
+  outline-offset: 2px;
 }
 .wire-line {
   display: flex;
