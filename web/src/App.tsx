@@ -53,6 +53,8 @@ export default function App() {
   const [settings, setSettings] = useState<SettingsT>({});
   const [articleDir, setArticleDir] = useState('');
   const [chromePath, setChromePath] = useState('');
+  const [checkUpdates, setCheckUpdates] = useState(false);
+  const [checkingForUpdates, setCheckingForUpdates] = useState(false);
   const [projectConfig, setProjectConfig] = useState<ProjectConfig | null>(null);
   const [loginStatus, setLoginStatus] = useState<Record<string, LoginStatus>>({});
   const [loginChecking, setLoginChecking] = useState(false);
@@ -167,6 +169,7 @@ export default function App() {
         setSettings(s);
         setArticleDir(s.articleDir || '');
         setChromePath(s.chromePath || '');
+        setCheckUpdates(s.checkUpdates === true);
         if (s.defaultPlatforms) setSelectedPlatforms(new Set(s.defaultPlatforms));
         if (s.loginStatus) setLoginStatus({ ...s.loginStatus });
         await refreshArticles(s.articleDir || '', { quiet: true });
@@ -430,6 +433,33 @@ export default function App() {
     }
   }, [articleDir, chromePath, message, refreshArticles]);
 
+  // The opt-in for the background update check the main process runs at
+  // startup. Saved the moment it is flipped — a switch the user has to
+  // remember to "save" is a switch they will forget.
+  const onCheckUpdatesChange = useCallback(async (next: boolean) => {
+    setCheckUpdates(next);
+    try {
+      const saved = await api.saveSettings({ checkUpdates: next });
+      setSettings(saved);
+    } catch (err) {
+      setCheckUpdates(!next); // roll back: a switch that shows "on" but does
+      message.error('设置保存失败: ' + (err as Error).message);
+    }
+  }, [message]);
+
+  // The manual check. The main process does the work and shows the dialogs;
+  // this only reports whether the call itself went through.
+  const onCheckForUpdates = useCallback(async () => {
+    setCheckingForUpdates(true);
+    try {
+      await api.checkForUpdates();
+    } catch (err) {
+      message.error('检查更新失败: ' + (err as Error).message);
+    } finally {
+      setCheckingForUpdates(false);
+    }
+  }, [message]);
+
   const onClearDir = useCallback(async () => {
     setArticleDir('');
     try {
@@ -570,6 +600,10 @@ export default function App() {
             chromePath={chromePath}
             onChromePathChange={setChromePath}
             onSave={onSaveSettings}
+            checkUpdates={checkUpdates}
+            onCheckUpdatesChange={(v) => void onCheckUpdatesChange(v)}
+            onCheckForUpdates={() => void onCheckForUpdates()}
+            checkingForUpdates={checkingForUpdates}
           />
         </div>
       )}

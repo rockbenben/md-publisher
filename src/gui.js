@@ -43,7 +43,10 @@ const DATA_DIR = process.env.MDPUB_DATA_DIR || resolve(__dirname, '..');
 const SETTINGS_FILE = resolve(DATA_DIR, 'settings.json');
 const UPLOAD_DIR = resolve(DATA_DIR, '.uploads');
 
-const DEFAULT_SETTINGS = { articleDir: '', defaultPlatforms: ['sspai', 'zhihu', 'wechat'] };
+// `checkUpdates` is the opt-in for the background update check the main
+// process runs at startup. Off by default: the app makes no request at all
+// until the user asks for it in Settings.
+const DEFAULT_SETTINGS = { articleDir: '', defaultPlatforms: ['sspai', 'zhihu', 'wechat'], checkUpdates: false };
 
 // Memory cache — avoids readFileSync on every request
 let _settingsCache = null;

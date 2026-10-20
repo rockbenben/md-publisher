@@ -27,6 +27,7 @@ export interface Settings {
   articleDir?: string;
   defaultPlatforms?: string[];
   chromePath?: string;
+  checkUpdates?: boolean;
   loginStatus?: Record<string, LoginStatus>;
 }
 
