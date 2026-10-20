@@ -1,11 +1,11 @@
-const { app, BrowserWindow, utilityProcess, dialog, Menu, shell, session, Notification } = require('electron');
+const { app, BrowserWindow, utilityProcess, dialog, Menu, shell, session, ipcMain } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const http = require('node:http');
 const crypto = require('node:crypto');
 const { createRestartPolicy } = require('./supervisor.cjs');
 const { buildTray } = require('./tray.cjs');
-const { checkForUpdate } = require('./update-check.cjs');
+const { checkForUpdates } = require('./update-check.cjs');
 
 const SERVER = path.join(__dirname, '..', 'src', 'gui.js');
 const PORT = Number(process.env.PORT) || 9870;
@@ -116,32 +116,36 @@ function openLogFile() {
   shell.openPath(p);
 }
 
-// One unauthenticated GET to the GitHub API; nothing about the user is sent.
-// Announced, never applied — see update-check.cjs for why.
-async function notifyUpdate() {
-  const info = await checkForUpdate();
-  if (!info || !info.newer) return;
-  const n = new Notification({
-    title: 'md-publisher 有新版本',
-    body: `v${info.latest} 已发布（当前 v${info.current}）。点击前往下载页。`,
-  });
-  n.on('click', () => { shell.openExternal(info.url); });
-  n.show();
+// The manual check (tray menu, settings page). It always reports an outcome,
+// including "could not reach the feed", so a silent click is never mistaken
+// for "already up to date".
+function manualUpdateCheck() {
+  return checkForUpdates({ getWindow: () => win, manual: true });
 }
 
-// Tray menu path: always reports an outcome, including "could not reach
-// GitHub", so a silent click is never mistaken for "already up to date".
-async function manualUpdateCheck() {
-  const info = await checkForUpdate();
-  const newer = info && info.newer;
-  const options = newer
-    ? { type: 'info', message: `发现新版本 v${info.latest}`,
-        detail: `当前 v${info.current}。是否打开下载页？`,
-        buttons: ['打开下载页', '稍后'], defaultId: 0, cancelId: 1 }
-    : { type: 'info', message: '已是最新版本',
-        detail: info ? `当前 v${info.current}。` : '未能连接 GitHub，请稍后再试。' };
-  const result = win ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options);
-  if (newer && result.response === 0) shell.openExternal(info.url);
+/**
+ * The opt-in flag, read from the settings the server owns.
+ *
+ * The settings file is the server's business — it is the only writer, and it
+ * is a separate process. Reading it over the loopback API rather than
+ * parsing the file here keeps one reader of settings.json instead of two.
+ */
+function readSetting(name) {
+  return new Promise((resolve) => {
+    const req = http.get(`${APP_URL}/api/settings`, { timeout: 3000 }, (res) => {
+      let body = '';
+      res.on('data', (c) => { body += c; });
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(body)[name]);
+        } catch {
+          resolve(undefined);
+        }
+      });
+    });
+    req.on('error', () => resolve(undefined));
+    req.on('timeout', () => { req.destroy(); resolve(undefined); });
+  });
 }
 
 function createWindow() {
@@ -299,11 +303,18 @@ function start() {
       dialog.showErrorBox('md-publisher', `服务启动超时，请查看日志文件：\n${logFilePath() || '（日志目录不可用）'}`);
     }
   });
-  // Check once, well after startup: the window must never wait on the
-  // network, and a failure here is never worth surfacing. Skipped in dev
-  // so running from source does not nag about the published release.
+  // The background check. **Opt-in, off by default**: the user turns it on in
+  // Settings, and until then the app makes no request at all. It runs once
+  // per start, well after startup: the window must never wait on the
+  // network, and a failure here is never worth surfacing. Skipped in dev so
+  // running from source does not nag about the published release.
   if (app.isPackaged) {
-    updateTimer = setTimeout(() => { updateTimer = null; notifyUpdate(); }, 15000);
+    updateTimer = setTimeout(async () => {
+      updateTimer = null;
+      const enabled = await readSetting('checkUpdates');
+      if (!enabled) return;
+      await checkForUpdates({ getWindow: () => win, manual: false });
+    }, 15000);
   }
   tray = buildTray({
     onShow: () => { if (win) { win.show(); win.focus(); } },
@@ -314,6 +325,10 @@ function start() {
     onCheckUpdate: manualUpdateCheck,
     onQuit: quitApp,
   });
+  // The settings page's "check for updates" button. The page is a web page:
+  // it cannot run the updater and it cannot show a native dialog, so the
+  // main process does the work. The preload exposes exactly this one call.
+  ipcMain.handle('update:check', async () => await manualUpdateCheck());
 }
 
 if (!app.requestSingleInstanceLock()) {

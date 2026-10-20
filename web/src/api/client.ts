@@ -98,5 +98,25 @@ export const api = {
   async shutdown(): Promise<void> {
     await fetch('/api/shutdown', { method: 'POST' });
   },
+
+  /**
+   * Ask the main process to check for a new release.
+   *
+   * The check itself — and the dialogs that go with it — live in the main
+   * process: a web page can neither run the updater nor show a native
+   * dialog. The preload exposes exactly this one call.
+   *
+   * The GUI server can also be opened in a plain browser (npm run gui), and
+   * there is no main process there — say so instead of failing silently.
+   */
+  async checkForUpdates(): Promise<string> {
+    const bridge = (window as unknown as {
+      mdPublisher?: { checkForUpdates?: () => Promise<string> };
+    }).mdPublisher;
+    if (!bridge?.checkForUpdates) {
+      throw new Error('检查更新只能在桌面应用里使用');
+    }
+    return bridge.checkForUpdates();
+  },
 };
 

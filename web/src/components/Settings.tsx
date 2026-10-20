@@ -1,4 +1,4 @@
-import { Button, Input } from 'antd';
+import { Button, Input, Switch } from 'antd';
 import { ClearOutlined, FolderOpenOutlined, SaveOutlined } from '@ant-design/icons';
 import { motion } from 'motion/react';
 import SectionLabel from './SectionLabel';
@@ -11,6 +11,10 @@ export default function Settings({
   chromePath,
   onChromePathChange,
   onSave,
+  checkUpdates,
+  onCheckUpdatesChange,
+  onCheckForUpdates,
+  checkingForUpdates,
 }: {
   articleDir: string;
   onChange: (v: string) => void;
@@ -19,6 +23,10 @@ export default function Settings({
   chromePath: string;
   onChromePathChange: (v: string) => void;
   onSave: () => void;
+  checkUpdates: boolean;
+  onCheckUpdatesChange: (v: boolean) => void;
+  onCheckForUpdates: () => void;
+  checkingForUpdates: boolean;
 }) {
   return (
     <motion.div
@@ -73,6 +81,30 @@ export default function Settings({
         <Button type="primary" icon={<SaveOutlined />} onClick={onSave}>
           保存设置
         </Button>
+      </div>
+
+      <div style={{ marginTop: 26 }}>
+        <SectionLabel cn="应用更新" en="UPDATES" />
+        <div className="settings-card sheet">
+          {/* Opt-in, off by default: the app makes no request at all until the
+              user turns this on. A tool that drives other people's websites on
+              the user's behalf has no business phoning home uninvited. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <Switch checked={checkUpdates} onChange={onCheckUpdatesChange} />
+            <div>
+              <div>启动时检查一次有没有新版本（可选，默认不开）</div>
+              <p className="settings-card__hint">
+                打开之后每次启动会向 GitHub 发一次请求，问一句「有没有新版本」——不发送任何稿件、路径或账号信息。
+                查到新版本也只是告诉你：要不要下载、要不要安装，都由你在弹出来的对话框里自己点。
+              </p>
+            </div>
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <Button loading={checkingForUpdates} onClick={onCheckForUpdates}>
+              检查有没有新版本
+            </Button>
+          </div>
+        </div>
       </div>
     </motion.div>
   );
