@@ -152,6 +152,10 @@ jobs:
 
       - name: Build
         # `--publish never`：产物一律不发布，由 publish 这个唯一的 job 上传。
+        # shell: bash —— Windows runner 的默认 shell 是 PowerShell，而下面这段是
+        # bash 语法（[ ]、export、set -euo pipefail）；不显式指定，Windows 那条腿
+        # 会直接报 ParserError，而 macOS/Linux 正常——又是一个「看着像平台问题」的坑。
+        shell: bash
         env:
           # ⚠️ **GitHub 把「没有这个 secret」渲染成空字符串，不是「不设置」。**
           # 而 electron-builder 把空的 CSC_LINK 理解成「证书就是这个路径」，
