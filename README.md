@@ -107,7 +107,7 @@ CLI 和 GUI 都会自动读取并预选其中的平台。`category` / `tag` 仅�
 
 ## 从源码运行
 
-需要 Node.js（>= 18 运行，>= 22.12 构建桌面应用）与一个 Chromium 内核浏览器。
+需要 Node.js（>= 22.13 安装与构建，下限取自 ESLint 与 Vite 的要求，见 `package.json` 的 `engines`）与一个 Chromium 内核浏览器。打包后的桌面应用自带运行时，使用者无需安装 Node。
 
 ```bash
 git clone https://github.com/rockbenben/md-publisher.git
@@ -134,6 +134,8 @@ GUI 前端构建产物已随仓库提供，无需额外构建即可 `npm run gui
 服务只监听本机回环地址，并拒绝非本机 `Origin` 的 API 请求——该接口没有鉴权，能读取文件、发布文章并关闭应用。确有跨机器访问需要时设 `HOST=0.0.0.0`，请仅在可信网络中使用。
 
 </details>
+
+维护者发版流程见 [docs/release.md](docs/release.md)。
 
 ## 已知限制
 

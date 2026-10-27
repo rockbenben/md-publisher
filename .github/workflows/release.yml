@@ -65,7 +65,13 @@ jobs:
           version="${TAG#v}"
           pkg=$(node -p "require('./package.json').version")
           if [ "$pkg" != "$version" ]; then
-            echo "::error::version mismatch: package.json $pkg != tag $version"
+            echo "::error::version mismatch: package.json says $pkg, tag $TAG says $version."
+            echo "::error::The tag is the single source of truth, and this job checks out the"
+            echo "::error::tagged commit — so the version has to be bumped ON that commit:"
+            echo "::error::  npm pkg set version=$version"
+            echo "::error::  git commit -am 'chore(release): set version to $version'"
+            echo "::error::  git tag -f $TAG && git push --force origin $TAG"
+            echo "::error::(or cut a new tag whose version the manifest already has)."
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
