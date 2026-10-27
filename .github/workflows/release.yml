@@ -118,14 +118,19 @@ jobs:
           # **同一个 OS 的所有架构必须放在同一个 job 里。**
           # 分成两个 job 的话，两个架构会各写一个同名的 latest*.yml 互相覆盖
           # （house style：分 job 打会各写同名 latest-mac.yml）。
-          - { os: windows-latest, name: win, args: '--win nsis --x64 --arm64' }
+          #
+          # 这里**只给架构，不给 target 名**：target 写在 electron-builder.yml 里。
+          # 命令行上的 target 名会**覆盖**配置里的 target 列表——之前写死
+          # `--win nsis`，配置里的 `portable` 就被覆盖掉了，产物里少了免安装版
+          # （v0.4.0 有、v0.5.0 没有）。目标只有一处说了算，才不会漏。
+          - { os: windows-latest, name: win, args: '--win --x64 --arm64' }
           # mac 的 zip 不是可选的第二个包，是**更新通道本身**：electron-updater 的
           # MacUpdater 只在清单里找 zip，只有 dmg 时 macOS 上「检查更新」必失败。
-          - { os: macos-latest, name: mac, args: '--mac dmg zip --x64 --arm64' }
+          - { os: macos-latest, name: mac, args: '--mac --x64 --arm64' }
           # AppImage 是 Linux 上唯一能自更新的格式；deb/rpm 只是安装渠道。
           # linux arm64 是在 x64 runner 上交叉构建的——真要带原生模块时得换成
           # arm64 runner（本应用打包的是纯 JS 的 Playwright，交叉构建没问题）。
-          - { os: ubuntu-22.04, name: linux, args: '--linux AppImage deb rpm --x64 --arm64' }
+          - { os: ubuntu-22.04, name: linux, args: '--linux --x64 --arm64' }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
