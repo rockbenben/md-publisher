@@ -152,17 +152,24 @@ jobs:
 
       - name: Build
         # `--publish never`：产物一律不发布，由 publish 这个唯一的 job 上传。
-        run: npx electron-builder ${{ matrix.args }} --publish never
         env:
-          # 凭据为空时 electron-builder 照常出未签名产物（不会失败）。
+          # ⚠️ **GitHub 把「没有这个 secret」渲染成空字符串，不是「不设置」。**
+          # 而 electron-builder 把空的 CSC_LINK 理解成「证书就是这个路径」，
+          # 于是拿工作目录当证书文件去签，macOS 上直接失败：
+          #   ⨯ /Users/runner/work/<repo>/<repo> not a file
+          #
+          # 所以这里先把 secret 收在别的名字下，只在真的拿到凭据时才导出成
+          # electron-builder 认的那些名字。**没有 CSC_LINK = 明确的不签名**，
+          # electron-builder 会照常出未签名产物（并在 release 说明里提示）。
+          #
           # 以后拿到凭据只要往仓库 secrets 里加同名变量，不用改工作流。
           #
           # macOS：Developer ID + 公证。**未签名时 macOS 的应用内更新装不上**
           # （Squirrel.Mac 要求更新包与已装应用同一签名），所以这两个变量到位之前，
           # macOS 的更新只是「查得到、装不上」。
-          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
-          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.MAC_CSC_LINK != '' }}
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          MAC_CSC_IDENTITY: ${{ secrets.MAC_CSC_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -171,6 +178,23 @@ jobs:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          # 不扫钥匙串：CI 上的签名身份只来自显式给的凭据，行为才可复现。
+          export CSC_IDENTITY_AUTO_DISCOVERY=false
+          if [ -n "$MAC_CSC_LINK" ]; then
+            export CSC_LINK="$MAC_CSC_LINK"
+            export CSC_KEY_PASSWORD="$MAC_CSC_KEY_PASSWORD"
+          fi
+          if [ -n "$MAC_CSC_IDENTITY" ]; then
+            export CSC_IDENTITY="$MAC_CSC_IDENTITY"
+          fi
+          if [ -n "$APPLE_ID" ]; then
+            export APPLE_ID
+            export APPLE_APP_SPECIFIC_PASSWORD
+            export APPLE_TEAM_ID
+          fi
+          npx electron-builder ${{ matrix.args }} --publish never
 
       - uses: actions/upload-artifact@v7
         with:
