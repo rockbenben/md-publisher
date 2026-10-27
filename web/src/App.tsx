@@ -9,6 +9,7 @@ import type {
   Platform,
   ProjectConfig,
   Settings as SettingsT,
+  SkippedFile,
 } from './api/types';
 import { useSSE } from './hooks/useSSE';
 import { pickFiles, pickFolder, type PickedFile } from './lib/filePicker';
@@ -58,10 +59,15 @@ export default function App() {
   const [projectConfig, setProjectConfig] = useState<ProjectConfig | null>(null);
   const [loginStatus, setLoginStatus] = useState<Record<string, LoginStatus>>({});
   const [loginChecking, setLoginChecking] = useState(false);
+  const [loginWait, setLoginWait] = useState('');
   const [isPublishing, setIsPublishing] = useState(false);
   const [dispatch, setDispatch] = useState<Record<string, DispatchInfo>>({});
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [progressText, setProgressText] = useState('');
+  const [scanError, setScanError] = useState('');
+  const [scanSkipped, setScanSkipped] = useState<SkippedFile[]>([]);
+  const [scanValidCount, setScanValidCount] = useState(0);
+  const [listCleared, setListCleared] = useState(false);
   const [dirModalOpen, setDirModalOpen] = useState(false);
   const [cover, setCover] = useState(readCoverPrefs);
 
@@ -72,8 +78,16 @@ export default function App() {
   // refreshes (init racing a fast 刷新 click) would otherwise let the slower
   // response win and overwrite the newer list, selection and project config.
   const refreshSeq = useRef(0);
+  // Latest manual rows for async scans: refreshArticles can finish after the
+  // user uploaded a file, and a stale closure would otherwise write back the
+  // old manual list and drop the new one.
+  const manualRef = useRef<Article[]>([]);
   // Sync guard against rapid double-click before React re-renders isPublishing.
   const pendingPublish = useRef(false);
+
+  useEffect(() => {
+    manualRef.current = manualArticles;
+  }, [manualArticles]);
   const today = useMemo(() => {
     const d = new Date();
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -104,6 +118,16 @@ export default function App() {
     });
   }, []);
 
+  const warnSkipped = useCallback(
+    (items: SkippedFile[], unable = '') => {
+      if (!items.length) return;
+      const names = items.slice(0, 3).map((i) => i.relativePath || i.fileName).join('、');
+      const more = items.length > 3 ? ` 等 ${items.length} 个文件` : '';
+      message.warning(`已跳过 ${names}${more}${unable ? `（${unable}）` : ''}`);
+    },
+    [message],
+  );
+
   // ---- Articles ----
   const refreshArticles = useCallback(
     async (dir: string, opts: { quiet?: boolean; preserveSelection?: boolean } = {}) => {
@@ -111,28 +135,39 @@ export default function App() {
       setProjectConfig(null);
       let scanned: Article[] = [];
       let cfg: ProjectConfig | null = null;
+      let scanFailure = '';
+      let skipped: SkippedFile[] = [];
       if (dir) {
         try {
           const data = await api.getArticles(dir);
-          if (seq !== refreshSeq.current) return; // a newer refresh superseded us
+          if (seq !== refreshSeq.current) return false; // a newer refresh superseded us
+          skipped = data.skipped ?? [];
           if (data.error) {
+            scanFailure = data.error;
             message.error(data.error);
           } else {
             scanned = data.articles;
             cfg = data.projectConfig ?? null;
           }
         } catch {
-          if (seq !== refreshSeq.current) return;
-          message.error('加载稿件失败');
+          if (seq !== refreshSeq.current) return false;
+          scanFailure = '加载稿件失败';
+          message.error(scanFailure);
         }
       }
-      // Drop manual entries the directory scan now also provides.
+      // Drop manual entries the directory scan now also provides. Read the
+      // latest manual list through the ref, and merge functionally: a manual
+      // add can land while this async scan is in flight.
       const dirPaths = new Set(scanned.map((a) => a.filePath));
-      const keptManual = manualArticles.filter((a) => !dirPaths.has(a.filePath));
+      const keptManual = manualRef.current.filter((a) => !dirPaths.has(a.filePath));
 
       setDirArticles(scanned);
-      setManualArticles(keptManual);
+      setManualArticles((prev) => prev.filter((a) => !dirPaths.has(a.filePath)));
       setProjectConfig(cfg);
+      setScanError(scanFailure);
+      setScanSkipped(skipped);
+      setScanValidCount(scanned.length);
+      setListCleared(false);
 
       if (opts.preserveSelection) {
         // A manual 刷新 must not undo the user's choices — re-selecting
@@ -156,8 +191,9 @@ export default function App() {
             : `已从默认目录加载 ${scanned.length} 篇稿件`,
         );
       }
+      return !scanFailure;
     },
-    [manualArticles, message],
+    [message],
   );
 
   // ---- Init ----
@@ -198,6 +234,7 @@ export default function App() {
       if (!files.length) return;
       try {
         const data = await api.uploadFiles(files);
+        if (data.skipped?.length) warnSkipped(data.skipped);
         if (!data.articles?.length) {
           message.error(data.error || '没有找到可解析的稿件');
           return;
@@ -215,7 +252,7 @@ export default function App() {
         message.error('添加失败: ' + (err as Error).message);
       }
     },
-    [allArticles, message],
+    [allArticles, message, warnSkipped],
   );
 
   const onPickFiles = useCallback(async () => {
@@ -244,6 +281,7 @@ export default function App() {
           message.error(data.error);
           return false;
         }
+        if (data.skipped?.length) warnSkipped(data.skipped, '无法解析');
         const existing = new Set(allArticles.map((a) => a.filePath));
         const fresh = (data.articles || []).filter((a) => !existing.has(a.filePath));
         if (!fresh.length) return true;
@@ -256,7 +294,7 @@ export default function App() {
         return false;
       }
     },
-    [allArticles, message],
+    [allArticles, message, warnSkipped],
   );
 
   const removeManual = useCallback((filePath: string) => {
@@ -282,10 +320,14 @@ export default function App() {
   );
   const deselectAll = useCallback(() => setSelected(new Set()), []);
   const clearAll = useCallback(() => {
+    // Invalidate an in-flight scan; otherwise its late response repopulates
+    // the list the user just cleared.
+    refreshSeq.current += 1;
     setDirArticles([]);
     setManualArticles([]);
     setProjectConfig(null);
     setSelected(new Set());
+    setListCleared(true);
   }, []);
 
   // ---- Platforms ----
@@ -308,11 +350,13 @@ export default function App() {
     async (id: string) => {
       try {
         await api.openPlatform(id);
+        const name = platforms.find((p) => p.id === id)?.name ?? id;
+        message.success(`已在自动化浏览器中打开「${name}」，需要登录可直接在那里操作`);
       } catch (err) {
         message.error('打开平台失败: ' + (err as Error).message);
       }
     },
-    [message],
+    [message, platforms],
   );
 
   const onCheckLogin = useCallback(async () => {
@@ -425,9 +469,11 @@ export default function App() {
       // `defaultPlatforms` (owned by the debounced togglePlatform save).
       const saved = await api.saveSettings({ articleDir: dir, chromePath: chromePath.trim() });
       setSettings(saved);
-      message.success('设置已保存');
+      // Scan before claiming success: an unreadable path would otherwise pair
+      // a green 「设置已保存」 with the red 「目录不存在」 toast.
+      const scanned = await refreshArticles(dir);
+      if (scanned) message.success('设置已保存');
       setTab('publish');
-      await refreshArticles(dir);
     } catch (err) {
       message.error('设置保存失败: ' + (err as Error).message);
     }
@@ -461,6 +507,9 @@ export default function App() {
   }, [message]);
 
   const onClearDir = useCallback(async () => {
+    // Same as clearAll: a scan started for the old directory must not land
+    // after this clear and resurrect its rows.
+    refreshSeq.current += 1;
     setArticleDir('');
     try {
       const saved = await api.saveSettings({ articleDir: '' });
@@ -468,6 +517,10 @@ export default function App() {
       const dirPaths = new Set(dirArticles.map((a) => a.filePath));
       setDirArticles([]);
       setProjectConfig(null);
+      setScanError('');
+      setScanSkipped([]);
+      setScanValidCount(0);
+      setListCleared(false);
       // Drop selections that belonged to the now-removed directory articles,
       // otherwise the publish count + button stay stuck on stale paths.
       setSelected((prev) => new Set([...prev].filter((fp) => !dirPaths.has(fp))));
@@ -481,7 +534,11 @@ export default function App() {
   const { connected } = useSSE({
     log: (d) => appendLog(d.text, d.level),
     status: (d) => {
-      if (d.publishing && !wasPublishing.current) setDispatch({}); // fresh run
+      if (d.publishing && !wasPublishing.current) {
+        setDispatch({}); // fresh run
+        setLoginWait('');
+      }
+      if (!d.publishing) setLoginWait('');
       wasPublishing.current = d.publishing;
       setIsPublishing(d.publishing);
     },
@@ -496,6 +553,7 @@ export default function App() {
         },
       })),
     done: (d) => {
+      setLoginWait('');
       // One result per (article, platform) pair — the old wording said just
       // 「N 成功」, which left the reader guessing what the number counted, and
       // 「成功」claimed more than the tool does: it fills editors, the publish
@@ -509,6 +567,7 @@ export default function App() {
       // A cancel is the user's own action, and the preceding toast already
       // announced it as info — escalating to error contradicts both.
       message.info('发布已取消');
+      setLoginWait('');
       setDispatch((prev) => {
         const next = { ...prev };
         for (const k of Object.keys(next)) if (next[k].status === 'running') delete next[k];
@@ -521,6 +580,8 @@ export default function App() {
         ...prev,
         [d.id]: { loggedIn: d.loggedIn, username: d.username || '' },
       })),
+    'login-wait': (d) =>
+      setLoginWait((prev) => (d.status === 'waiting' ? d.platform : prev === d.platform ? '' : prev)),
     'app-error': (d) => d.message && message.error(d.message),
   });
 
@@ -540,7 +601,9 @@ export default function App() {
         <div role="tabpanel" id="panel-publish" aria-labelledby="tab-publish">
           <ProgressBanner
             visible={isPublishing}
-            text={progressText}
+            text={loginWait
+              ? `正在等待「${loginWait}」登录：请到自动化浏览器完成登录，完成后会自动继续`
+              : progressText}
             onCancel={onCancel}
           />
 
@@ -548,6 +611,11 @@ export default function App() {
             articles={allArticles}
             selected={selected}
             hasDir={!!settings.articleDir}
+            scanError={scanError}
+            skipped={scanSkipped}
+            allSkipped={scanSkipped.length > 0 && scanValidCount === 0}
+            listCleared={listCleared}
+            articleDir={settings.articleDir || ''}
             disabled={isPublishing}
             onToggle={toggleArticle}
             onSelectAll={selectAll}
@@ -568,6 +636,7 @@ export default function App() {
             dispatch={dispatch}
             loginChecking={loginChecking}
             disabled={isPublishing}
+            hasArticles={allArticles.length > 0}
             onToggle={togglePlatform}
             onOpen={onOpenPlatform}
             onCheckLogin={onCheckLogin}

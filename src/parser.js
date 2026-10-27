@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync, statSync, existsSync, realpathSync } from 'fs';
 import { readdir, stat, readFile, access, realpath } from 'fs/promises';
-import { join, extname, basename, resolve, dirname } from 'path';
+import { join, extname, basename, resolve, dirname, relative, sep, isAbsolute } from 'path';
 import { load as loadYaml } from 'js-yaml';
 import { PLATFORMS } from './config.js';
 
@@ -293,7 +293,7 @@ export async function parseArticleAsync(filePath) {
  * Async version of scanArticleDir — non-blocking for GUI server routes.
  * Prevents blocking the Express event loop (SSE heartbeat, etc.).
  */
-export async function scanArticleDirAsync(dirPath, { recursive = false } = {}) {
+export async function scanArticleDirAsync(dirPath, { recursive = false, onSkip } = {}) {
   try { await access(dirPath); } catch { return []; }
 
   const files = []; // { path, mtimeMs }
@@ -339,7 +339,17 @@ export async function scanArticleDirAsync(dirPath, { recursive = false } = {}) {
     if (results[i].status === 'fulfilled') {
       articles.push(results[i].value);
     } else {
-      console.warn(`⚠ 跳过无法解析的文件: ${basename(files[i].path)} — ${results[i].reason?.message}`);
+      const fileName = basename(files[i].path);
+      const reason = results[i].reason?.message || String(results[i].reason);
+      console.warn(`⚠ 跳过无法解析的文件: ${fileName} — ${reason}`);
+      const rel = relative(dirPath, files[i].path);
+      onSkip?.({
+        fileName,
+        relativePath: rel && !rel.startsWith('..') && !isAbsolute(rel) ? rel.split(sep).join('/') : '',
+        // Keep the UI warning short and free of the YAML snippet; the full
+        // parser error is already in the server log above.
+        reason: reason.split(/\r?\n/)[0].slice(0, 240),
+      });
     }
   }
 

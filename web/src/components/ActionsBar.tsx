@@ -41,7 +41,15 @@ export default function ActionsBar({
       <div className="dispatch-meta">
         {ready ? (
           <>
-            <b>{articleCount}</b> 篇稿件 <span className="arrow">→</span> <b>{platformCount}</b> 个平台
+            <div>
+              <b>{articleCount}</b> 篇稿件 <span className="arrow">→</span> <b>{platformCount}</b> 个平台
+            </div>
+            <div className="dispatch-meta__note">只填入平台编辑器，最后的「发布」由你点</div>
+            {articleCount > 20 && (
+              <div className="dispatch-meta__note dispatch-meta__note--warn">
+                将逐个打开 {articleCount * platformCount} 个平台编辑器，可能需要较长时间；可先「全不选」再挑几篇。
+              </div>
+            )}
           </>
         ) : (
           <span className="dispatch-meta--hint">选择稿件与平台后发布</span>
@@ -63,7 +71,7 @@ export default function ActionsBar({
         </Tooltip>
       </div>
 
-      <Tooltip title="关闭自动化 Chrome 释放资源（不影响本页）">
+      <Tooltip title="关闭自动化 Chrome 释放资源；其中已填写但还没发布的平台页面也会关闭（不影响本页）">
         <Button onClick={onCloseBrowser} disabled={isPublishing}>关闭浏览器</Button>
       </Tooltip>
     </div>

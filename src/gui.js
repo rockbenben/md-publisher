@@ -7,14 +7,14 @@ if (major < 18) {
 }
 
 import express from 'express';
-import { resolve, dirname, basename, extname } from 'path';
+import { resolve, dirname, basename, extname, relative, sep, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync, readFileSync } from 'fs';
 import { readdir, mkdir, writeFile, unlink, readFile, stat as fsStat, access as fsAccess } from 'fs/promises';
 import { execFile } from 'node:child_process';
 import { PLATFORMS } from './config.js';
 import { parseArticleString, scanArticleDirAsync, parseArticleAsync, ARTICLE_EXTS, loadProjectConfigAsync } from './parser.js';
-import { closeContext, disconnectContext, setGuiMode, getContext, openPage } from './browser.js';
+import { closeContext, disconnectContext, setGuiMode, setNoticeHandler, abortLoginWait, getContext, openPage } from './browser.js';
 import { isPathWithin, stripAnsi, safeStringify, sanitizeSettings, orderedValidPlatforms, sanitizeUploadFileName } from './gui-utils.js';
 import { attachForkBridge, tokenMatches } from './fork-bridge.js';
 
@@ -105,6 +105,9 @@ function updateSettings(mutator) {
 
 // --- SSE clients ---
 const sseClients = new Set();
+// A client that reloads during a five-minute login wait must still see what the
+// run is waiting for; replay the latest notice in the initial SSE snapshot.
+let lastLoginWait = null;
 
 function broadcast(event, data) {
   if (sseClients.size === 0) return; // Skip serialization when no clients
@@ -121,6 +124,13 @@ function broadcast(event, data) {
     }
   }
 }
+
+// Log lines are easy to miss: the progress banner is what the user is looking
+// at. Surface the login wait there as a dedicated event.
+setNoticeHandler((notice) => {
+  lastLoginWait = notice.status === 'waiting' ? notice : null;
+  broadcast('login-wait', notice);
+});
 
 // Clean up stale uploaded files on startup (older than 24h)
 (async () => {
@@ -164,6 +174,9 @@ async function publishArticles(articles, platformIds, options = {}, signal = nul
   // isPublishing is already set by the caller (route handler) to prevent race conditions
   const allResults = [];
   let cancelled = false;
+  // A platform whose login timed out will not recover during this run. Waiting
+  // five minutes again for every later article turns a big batch into hours.
+  const loginFailed = new Set();
 
   try {
     for (let i = 0; i < articles.length; i++) {
@@ -182,6 +195,14 @@ async function publishArticles(articles, platformIds, options = {}, signal = nul
 
         const publishFn = platformPublishers[platformId];
         if (!publishFn) continue;
+        if (loginFailed.has(platformId)) {
+          allResults.push({
+            success: false,
+            platform: PLATFORMS[platformId].name,
+            message: '登录未完成，本次已跳过',
+          });
+          continue;
+        }
 
         broadcast('platform', {
           articleIndex: i,
@@ -201,6 +222,18 @@ async function publishArticles(articles, platformIds, options = {}, signal = nul
             result,
           });
         } catch (error) {
+          // A cancel interrupts the platform's own wait (e.g. login). Don't
+          // stamp it as a failure: the user asked it to stop, and the cancelled
+          // toast is the truthful account.
+          if (signal?.aborted) {
+            cancelled = true;
+            broadcast('cancelled', {});
+            break;
+          }
+          if (error?.code === 'LOGIN_REQUIRED' && !loginFailed.has(platformId)) {
+            loginFailed.add(platformId);
+            console.log(`⚠ ${PLATFORMS[platformId].name} 登录未完成，本次运行将跳过该平台剩余稿件`);
+          }
           const result = {
             success: false,
             platform: PLATFORMS[platformId].name,
@@ -353,13 +386,18 @@ app.get('/api/articles', asyncHandler(async (req, res) => {
   }
 
   try {
+    const skipped = [];
     const [articles, projectConfig] = await Promise.all([
-      scanArticleDirAsync(absDir, { recursive: true }),
+      scanArticleDirAsync(absDir, {
+        recursive: true,
+        onSkip: (item) => skipped.push(item),
+      }),
       loadProjectConfigAsync(absDir),
     ]);
     res.json({
       articles: articles.map((a) => {
         const ext = extname(a.filePath);
+        const rel = relative(absDir, a.filePath);
         return {
           title: a.meta.title || basename(a.filePath, ext),
           description: a.meta.description || '',
@@ -367,10 +405,14 @@ app.get('/api/articles', asyncHandler(async (req, res) => {
           cover: a.meta.cover || '',
           filePath: a.filePath,
           fileName: basename(a.filePath),
+          relativePath: rel && !rel.startsWith('..') && !isAbsolute(rel)
+            ? rel.split(sep).join('/')
+            : '',
         };
       }),
       dir: absDir,
       projectConfig: projectConfig || undefined,
+      skipped,
     });
   } catch (err) {
     res.status(500).json({ articles: [], error: `扫描目录失败: ${err.message}` });
@@ -395,9 +437,19 @@ app.post('/api/articles/parse', asyncHandler(async (req, res) => {
 
   // If it's a directory, scan it
   if (s.isDirectory()) {
-    const articles = await scanArticleDirAsync(absPath, { recursive: true });
+    const skipped = [];
+    const articles = await scanArticleDirAsync(absPath, {
+      recursive: true,
+      onSkip: (item) => skipped.push(item),
+    });
     if (articles.length === 0) {
-      return res.status(400).json({ error: `目录下没有文章文件: ${absPath}` });
+      const detail = skipped.length
+        ? `（${skipped.map((s) => s.fileName).join('、')} 无法解析）`
+        : '';
+      return res.status(400).json({
+        error: `目录下没有可解析的文章文件${detail}`,
+        skipped,
+      });
     }
     return res.json({
       articles: articles.map((a) => {
@@ -412,6 +464,7 @@ app.post('/api/articles/parse', asyncHandler(async (req, res) => {
           manual: true,
         };
       }),
+      skipped,
     });
   }
 
@@ -431,7 +484,8 @@ app.post('/api/articles/parse', asyncHandler(async (req, res) => {
       }],
     });
   } catch (err) {
-    res.status(400).json({ error: `解析失败: ${err.message}` });
+    const reason = String(err?.message || err).split(/\r?\n/)[0].slice(0, 240);
+    res.status(400).json({ error: `解析失败: ${reason}` });
   }
 }));
 
@@ -444,6 +498,7 @@ app.post('/api/articles/upload', asyncHandler(async (req, res) => {
   if (files.length > 100) return res.status(400).json({ error: `文件数量超出限制 (${files.length}/100)` });
   await mkdir(UPLOAD_DIR, { recursive: true });
   const articles = [];
+  const skipped = [];
   // Mirrors MAX_FILE_SIZE in web/src/lib/filePicker.ts — the browser checks it
   // first so the user is told before uploading, and this catches a direct POST
   // that skipped the UI. Keep the two in step.
@@ -453,17 +508,20 @@ app.post('/api/articles/upload', asyncHandler(async (req, res) => {
       // Server-side size check (frontend also checks, but direct POST could bypass)
       if (typeof f.content !== 'string' || f.content.length > MAX_FILE_SIZE) {
         origLog(`⚠ 跳过过大或无效的文件: ${f.name}`);
+        skipped.push({ fileName: f.name, reason: '文件过大或内容无效' });
         continue;
       }
       let safeName = sanitizeUploadFileName(f.name);
       // Skip files with unsupported extensions
       if (!ARTICLE_EXTS.has(extname(safeName).toLowerCase())) {
         origLog(`⚠ 跳过不支持的文件类型: ${f.name}`);
+        skipped.push({ fileName: f.name, reason: '不支持的文件类型' });
         continue;
       }
       let tmpPath = resolve(UPLOAD_DIR, safeName);
       if (!isPathWithin(tmpPath, UPLOAD_DIR)) {
         origLog(`⚠ 跳过非法文件名: ${f.name}`);
+        skipped.push({ fileName: f.name, reason: '文件名不合法' });
         continue;
       }
       // Disambiguate distinct files that share a basename (e.g. Hugo-style page
@@ -505,10 +563,12 @@ app.post('/api/articles/upload', asyncHandler(async (req, res) => {
         manual: true,
       });
     } catch (err) {
+      const reason = String(err?.message || err).split(/\r?\n/)[0].slice(0, 240);
       origLog(`⚠ 跳过无法解析的文件: ${f.name} — ${err?.message || err}`);
+      skipped.push({ fileName: f.name, reason });
     }
   }
-  res.json({ articles });
+  res.json({ articles, skipped });
 }));
 
 // GET /api/browse-dir — list subdirectories (for web-based directory browser)
@@ -617,6 +677,9 @@ app.post('/api/cancel-publish', (req, res) => {
   if (!isPublishing || !publishAbort) {
     return res.status(400).json({ error: '没有正在进行的发布任务' });
   }
+  // The publish signal is only checked between platforms. A login wait can
+  // last up to five minutes, so interrupt that wait directly as well.
+  abortLoginWait();
   publishAbort.abort();
   res.json({ ok: true });
 });
@@ -820,6 +883,9 @@ app.get('/api/events', (req, res) => {
     : (loadSettings().loginStatus || {});
   for (const [id, result] of Object.entries(cachedLogin)) {
     res.write(`event: login-status\ndata: ${JSON.stringify({ id, ...result })}\n\n`);
+  }
+  if (lastLoginWait) {
+    res.write(`event: login-wait\ndata: ${JSON.stringify(lastLoginWait)}\n\n`);
   }
   sseClients.add(res);
 

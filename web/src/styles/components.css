@@ -172,6 +172,17 @@
 /* ---------- Manuscripts ---------- */
 .manuscript-list {
   min-height: 96px;
+  max-height: min(60vh, 560px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.manuscript-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
+  margin-right: 2px;
 }
 .manuscript {
   display: flex;
@@ -276,6 +287,39 @@
 }
 .empty {
   padding: 22px 0;
+}
+.manual-hint {
+  margin: 10px 2px 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+.scan-warning {
+  margin: 10px 2px 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--cinnabar-deep);
+}
+.filterbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 10px 0 4px;
+}
+.filterbar .ant-input-affix-wrapper {
+  flex: 1;
+}
+.filterbar__count {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+.filterbar__note {
+  margin: 2px 2px 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-faint);
 }
 
 /* ---------- Destinations ---------- */
@@ -412,6 +456,12 @@
   pointer-events: none;
   z-index: 2;
 }
+.dest-hint {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
 
 /* ---------- Config badge ---------- */
 .config-badge {
@@ -500,6 +550,14 @@
 .dispatch-meta--hint {
   color: var(--ink-faint);
 }
+.dispatch-meta__note {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+.dispatch-meta__note--warn {
+  color: var(--cinnabar-deep);
+}
 .actions__spacer {
   flex: 1;
 }
@@ -519,12 +577,16 @@
 
 /* ---------- Progress banner ---------- */
 .progress {
+  position: sticky;
+  top: 0;
+  z-index: 10;
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 18px;
+  margin-top: 0;
   padding: 11px 15px;
-  background: var(--seal-wash);
+  background-color: var(--paper);
+  background-image: linear-gradient(var(--seal-wash), var(--seal-wash));
   border-left: 3px solid var(--cinnabar);
   overflow: hidden;
 }

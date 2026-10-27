@@ -9,6 +9,7 @@ export interface SSEHandlers {
   cancelled?: () => void;
   'login-check'?: (d: { status: 'start' | 'done' }) => void;
   'login-status'?: (d: { id: string; loggedIn: boolean; username?: string }) => void;
+  'login-wait'?: (d: { platform: string; status: 'waiting' | 'done' }) => void;
   'app-error'?: (d: { message: string }) => void;
 }
 
@@ -21,6 +22,7 @@ const EVENTS: (keyof SSEHandlers)[] = [
   'cancelled',
   'login-check',
   'login-status',
+  'login-wait',
   'app-error',
 ];
 

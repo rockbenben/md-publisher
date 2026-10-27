@@ -41,6 +41,14 @@ let context = null;   // The persistent default context (carries the profile)
 let chromeProc = null; // The detached Chrome we spawned (null if we reconnected)
 let connecting = null; // mutex: prevents concurrent connect/launch races
 let guiMode = false;
+// The login wait currently in progress. The GUI's cancel button aborts this
+// separately from the publish signal: the signal is only checked between
+// platforms, so a five-minute login wait would otherwise ignore the cancel.
+let pendingLoginAbort = null;
+// Optional GUI sink for "login required" states. The console line lands in the
+// log panel below the fold; the progress banner needs this to say what the run
+// is actually waiting for.
+let noticeHandler = null;
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -142,6 +150,16 @@ async function connectCDP(deadline) {
 
 /** Enable GUI mode — skips terminal-based waitForEnter calls */
 export function setGuiMode(enabled) { guiMode = enabled; }
+
+/** Route user-actionable waiting states (e.g. a login prompt) to the GUI. */
+export function setNoticeHandler(handler) { noticeHandler = handler; }
+
+/** Interrupt a login wait; the publish loop stops at its next checkpoint. */
+export function abortLoginWait() { pendingLoginAbort?.abort(); }
+
+function emitNotice(notice) {
+  try { noticeHandler?.(notice); } catch { /* a UI hint must never break publishing */ }
+}
 
 /**
  * Get the persistent browser context, connecting over CDP to a long-lived
@@ -401,6 +419,39 @@ export function alertUser(message) {
   }
 }
 
+function cancelError() {
+  return new Error('发布已取消');
+}
+
+/** A timeout/undetectable login must be distinguishable from a generic failure. */
+function loginError(message, cause) {
+  const error = new Error(message, cause ? { cause } : undefined);
+  error.code = 'LOGIN_REQUIRED';
+  return error;
+}
+
+/** Reject as soon as `signal` aborts, without leaving `promise` unhandled. */
+function withAbort(promise, signal) {
+  if (!signal) return promise;
+  if (signal.aborted) {
+    // The caller already created the underlying wait; consume its eventual
+    // rejection so an already-cancelled signal cannot create an unhandled one.
+    Promise.resolve(promise).catch(() => {});
+    return Promise.reject(cancelError());
+  }
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener('abort', onAbort);
+      reject(cancelError());
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => { signal.removeEventListener('abort', onAbort); resolve(value); },
+      (err) => { signal.removeEventListener('abort', onAbort); reject(err); },
+    );
+  });
+}
+
 /**
  * Check if user is logged in. If not, alert and wait for manual login.
  *
@@ -410,56 +461,97 @@ export function alertUser(message) {
  */
 export async function ensureLoggedIn(page, platformConfig) {
   const { name, loggedInSelector, loginUrlPattern } = platformConfig;
+  const ac = new AbortController();
+  pendingLoginAbort = ac;
 
-  // Step 1: Try to find logged-in indicator first (give the page time to load)
-  if (loggedInSelector) {
-    try {
-      await page.waitForSelector(loggedInSelector, { timeout: 15000 });
-      return; // Already logged in
-    } catch {
-      // Selector not found — might need login, check URL pattern next
+  try {
+    // Step 1: Try to find logged-in indicator first (give the page time to load)
+    if (loggedInSelector) {
+      try {
+        await withAbort(
+          page.waitForSelector(loggedInSelector, { timeout: 15000 }),
+          ac.signal,
+        );
+        return; // Already logged in
+      } catch (err) {
+        if (ac.signal.aborted) throw err;
+        // Selector not found — might need login, check URL pattern next
+      }
     }
-  }
 
-  // Step 2: Check URL pattern as secondary signal
-  if (loginUrlPattern && loginUrlPattern.test(page.url())) {
-    alertUser(`${name} 需要登录`);
-    await waitForLogin(page, platformConfig);
-    return;
-  }
+    // Step 2: Check URL pattern as secondary signal
+    if (loginUrlPattern && loginUrlPattern.test(page.url())) {
+      alertUser(`${name} 需要登录`);
+      await waitForLogin(page, platformConfig, ac.signal);
+      return;
+    }
 
-  // Step 3: Selector not found AND no URL pattern match — probably still needs login
-  if (loggedInSelector) {
-    alertUser(`${name} 需要登录`);
-    await waitForLogin(page, platformConfig);
+    // Step 3: Selector not found AND no URL pattern match — probably still needs login
+    if (loggedInSelector) {
+      alertUser(`${name} 需要登录`);
+      await waitForLogin(page, platformConfig, ac.signal);
+    }
+  } finally {
+    if (pendingLoginAbort === ac) pendingLoginAbort = null;
   }
 }
 
 /**
  * Wait for the user to complete login by detecting the logged-in selector.
- * Uses Promise.race between selector detection and manual Enter key.
- * Both branches are wrapped to never reject — timeout just resolves false.
+ *
+ * CLI: race selector detection against a manual Enter press.
+ * GUI: no terminal exists, so wait only for the selector. Resolving on an
+ * immediate fake "Enter" is what used to print 登录成功 and then fail on a
+ * login page; timeout must surface as an error instead.
+ *
+ * Exported for the login-wait regression test.
  */
-async function waitForLogin(page, platformConfig) {
-  const { loggedInSelector } = platformConfig;
+export async function waitForLogin(page, platformConfig, signal) {
+  const { name, loggedInSelector } = platformConfig;
+  emitNotice({ platform: name, status: 'waiting' });
+  console.log(chalk.gray(guiMode
+    ? '   请在自动化浏览器中完成登录，完成后会自动继续...'
+    : '   登录完成后按 Enter 继续，或等待自动检测...'));
 
-  console.log(chalk.gray('   登录完成后按 Enter 继续，或等待自动检测...'));
+  try {
+    if (!loggedInSelector) {
+      if (guiMode) throw loginError(`${name} 登录状态无法自动检测，请先在平台页面登录后重试`);
+      await waitForEnter(null);
+      console.log(chalk.green('   ✓ 继续执行'));
+      return;
+    }
 
-  // If no selector, resolve null so waitForEnter is the only way to proceed
-  const selectorPromise = loggedInSelector
-    ? page.waitForSelector(loggedInSelector, { timeout: TIMEOUTS.login }).catch(() => null)
-    : Promise.resolve(null);
+    const selectorPromise = page.waitForSelector(loggedInSelector, { timeout: TIMEOUTS.login });
 
-  // Use AbortController to clean up readline when selector wins the race
-  const ac = new AbortController();
-  await Promise.race([
-    selectorPromise.then(v => { ac.abort(); return v; }),
-    waitForEnter(null, ac.signal),
-  ]);
+    if (guiMode) {
+      await withAbort(selectorPromise, signal);
+    } else {
+      // Abort the readline prompt when the selector wins; the reverse case
+      // (Enter pressed first) leaves the selector wait running, which is fine
+      // — the user explicitly chose to continue.
+      const enterAbort = new AbortController();
+      try {
+        await Promise.race([
+          withAbort(selectorPromise, signal),
+          waitForEnter(null, enterAbort.signal),
+        ]);
+      } finally {
+        enterAbort.abort();
+      }
+    }
 
-  // Restore terminal title
-  process.stdout.write('\x1b]0;md-publisher\x07');
-  console.log(chalk.green('   \u2713 登录成功'));
+    console.log(chalk.green('   ✓ 登录成功'));
+  } catch (err) {
+    if (signal?.aborted || err?.message === '发布已取消') throw cancelError();
+    if (err?.name === 'TimeoutError' || /timeout/i.test(err?.message || '')) {
+      throw loginError(`${name} 登录未完成，请先在自动化浏览器中登录后重试`, err);
+    }
+    throw err;
+  } finally {
+    // alertUser changed the terminal title; restore it however the wait ended.
+    process.stdout.write('\x1b]0;md-publisher\x07');
+    emitNotice({ platform: name, status: 'done' });
+  }
 }
 
 /**

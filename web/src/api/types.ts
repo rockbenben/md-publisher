@@ -14,7 +14,15 @@ export interface Article {
   cover?: string;
   filePath: string;
   fileName: string;
+  /** Path relative to the scanned article directory, for disambiguating duplicates. */
+  relativePath?: string;
   manual?: boolean;
+}
+
+export interface SkippedFile {
+  fileName: string;
+  relativePath?: string;
+  reason: string;
 }
 
 export interface ProjectConfig {

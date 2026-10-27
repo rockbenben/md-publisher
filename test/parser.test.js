@@ -10,6 +10,7 @@ import {
   stripFirstImage,
   firstContentImageSrc,
   scanArticleDir,
+  scanArticleDirAsync,
   loadProjectConfig,
   coverFileMeta,
 } from '../src/parser.js';
@@ -239,6 +240,26 @@ test('scanArticleDir: recursive flag controls subdirectory descent', () => {
 
     const deep = scanArticleDir(dir, { recursive: true }).map(a => a.filePath.split(/[\\/]/).pop());
     assert.ok(deep.includes('top.md') && deep.includes('nested.md'), 'recursive descends');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('scanArticleDirAsync: reports skipped files without dropping the good ones', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mdpub-scan-skip-'));
+  try {
+    writeFileSync(join(dir, 'good.md'), '---\ntitle: Good\n---\nbody');
+    writeFileSync(join(dir, 'bad.md'), '---\ntitle: [unclosed\n---\nbody');
+
+    const skipped = [];
+    const articles = await scanArticleDirAsync(dir, { onSkip: (item) => skipped.push(item) });
+
+    assert.deepEqual(articles.map(a => a.meta.title), ['Good']);
+    assert.equal(skipped.length, 1);
+    assert.equal(skipped[0].fileName, 'bad.md');
+    assert.equal(skipped[0].relativePath, 'bad.md');
+    assert.ok(skipped[0].reason, 'the parser error is reported');
+    assert.ok(!skipped[0].reason.includes('\n'), 'the UI reason is one line, not the YAML snippet');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

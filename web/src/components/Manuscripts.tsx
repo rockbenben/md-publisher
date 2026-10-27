@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button, Empty, Input, Tooltip } from 'antd';
 import {
   CloseOutlined,
@@ -6,15 +6,21 @@ import {
   FolderOpenOutlined,
   PlusOutlined,
   ReloadOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import { AnimatePresence, motion } from 'motion/react';
-import type { Article } from '../api/types';
+import type { Article, SkippedFile } from '../api/types';
 import SectionLabel from './SectionLabel';
 
 export default function Manuscripts({
   articles,
   selected,
   hasDir,
+  scanError,
+  skipped,
+  allSkipped,
+  listCleared,
+  articleDir,
   disabled,
   onToggle,
   onSelectAll,
@@ -30,6 +36,11 @@ export default function Manuscripts({
   articles: Article[];
   selected: Set<string>;
   hasDir: boolean;
+  scanError: string;
+  skipped: SkippedFile[];
+  allSkipped: boolean;
+  listCleared: boolean;
+  articleDir: string;
   disabled: boolean;
   onToggle: (filePath: string) => void;
   onSelectAll: () => void;
@@ -44,6 +55,27 @@ export default function Manuscripts({
 }) {
   const [path, setPath] = useState('');
   const [adding, setAdding] = useState(false);
+  const [filter, setFilter] = useState('');
+  const hasManual = articles.some((a) => a.manual);
+  const query = filter.trim().toLowerCase();
+  const visible = query
+    ? articles.filter((a) =>
+        [a.title, a.fileName, a.relativePath, a.description]
+          .some((v) => (v || '').toLowerCase().includes(query)),
+      )
+    : articles;
+  const skippedNames = skipped.slice(0, 3).map((s) => s.relativePath || s.fileName).join('、');
+  const skippedMore = skipped.length > 3 ? ' 等' : '';
+  const skippedTitle = skipped.map((s) => `${s.relativePath || s.fileName}: ${s.reason}`).join('\n\n');
+
+  useEffect(() => {
+    setFilter('');
+  }, [articleDir]);
+
+  const clearList = () => {
+    setFilter('');
+    onClear();
+  };
 
   const submitPath = async () => {
     const p = path.trim();
@@ -64,12 +96,15 @@ export default function Manuscripts({
         en="MANUSCRIPTS"
         action={
           <div className="kicker__actions">
+            {articles.length > 0 && (
+              <span className="manuscript-count">共 {articles.length} 篇</span>
+            )}
             {/* 「取消」reads as "abort", not "deselect", and it sits right next to
                 「清空」which removes the rows themselves — the pair that actually
                 needs to be legible is 全选 / 全不选. */}
             <button onClick={onSelectAll} disabled={disabled || !articles.length}>全选</button>
             <button onClick={onDeselectAll} disabled={disabled || !articles.length}>全不选</button>
-            <button onClick={onClear} disabled={disabled}>清空列表</button>
+            <button onClick={clearList} disabled={disabled}>清空列表</button>
             <button onClick={onRefresh} disabled={disabled}>
               <ReloadOutlined /> 刷新
             </button>
@@ -97,35 +132,92 @@ export default function Manuscripts({
         </Button>
       </div>
 
+      {skipped.length > 0 && (
+        <p className="scan-warning" title={skippedTitle} role="status">
+          ⚠ 有 {skipped.length} 篇稿件未加载：{skippedNames}{skippedMore}（无法解析）。修正后点「刷新」。
+        </p>
+      )}
+
+      {hasManual && (
+        <p className="manual-hint">
+          手动添加的稿件只在本次打开有效；要下次自动加载，请在「设置」里配置默认目录。
+        </p>
+      )}
+
+      {(articles.length > 20 || !!query) && (
+        <div className="filterbar">
+          <Input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            allowClear
+            prefix={<SearchOutlined />}
+            placeholder="筛选标题、文件名或摘要"
+            aria-label="筛选稿件"
+            disabled={disabled}
+          />
+          {query && (
+            <span className="filterbar__count" role="status">
+              筛选结果 {visible.length} / 总 {articles.length}
+            </span>
+          )}
+        </div>
+      )}
+
+      {query && (
+        <p className="filterbar__note">
+          筛选只影响列表显示，全选/全不选仍作用于全部稿件（当前已选 {selected.size} 篇）。
+        </p>
+      )}
+
       <div className="manuscript-list sheet">
         {articles.length === 0 ? (
           <Empty
             className="empty"
             image={Empty.PRESENTED_IMAGE_SIMPLE}
             description={
-              hasDir
-                ? '该目录下没有稿件文件（支持 .md .markdown .txt 等 8 种扩展名）'
-                : '在「设置」里配置默认目录，或在上方添加文件 / 路径'
+              scanError
+                ? `无法读取默认目录：${scanError}`
+                : hasDir && listCleared
+                  ? '列表已清空，点上方的「刷新」重新扫描'
+                  : allSkipped
+                    ? `目录中的 ${skipped.length} 篇稿件都无法解析`
+                    : hasDir
+                      ? '该目录下没有稿件文件（支持 .md .markdown .txt 等 8 种扩展名）'
+                      : '在「设置」里配置默认目录，或在上方添加文件 / 路径'
             }
           >
-            {!hasDir && (
+            {(!hasDir || scanError) && (
               /* The empty state tells you to go to 设置 but offered no way to
-                 get there — the only route was the tab two rows up. */
-              <Button onClick={onOpenSettings}>去设置里配置目录</Button>
+                 get there — the only route was the tab two rows up. The same
+                 dead end appeared when the configured path itself was bad. */
+              <Button onClick={onOpenSettings}>
+                {scanError ? '去设置里修改目录' : '去设置里配置目录'}
+              </Button>
             )}
+          </Empty>
+        ) : visible.length === 0 ? (
+          <Empty
+            className="empty"
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description="没有匹配的稿件"
+          >
+            <Button onClick={() => setFilter('')}>清除筛选</Button>
           </Empty>
         ) : (
           <AnimatePresence initial={false}>
-            {articles.map((a, i) => {
+            {visible.map((a, i) => {
               const sel = selected.has(a.filePath);
               return (
                 <motion.div
                   key={a.filePath}
-                  layout
+                  layout={!query}
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, height: 0 }}
-                  transition={{ duration: 0.22, delay: Math.min(i * 0.018, 0.25) }}
+                  exit={query ? undefined : { opacity: 0, height: 0 }}
+                  transition={{
+                    duration: query ? 0 : 0.22,
+                    delay: query ? 0 : Math.min(i * 0.018, 0.25),
+                  }}
                   className={`manuscript${sel ? ' manuscript--sel' : ''}`}
                   role="checkbox"
                   aria-checked={sel}
@@ -163,8 +255,11 @@ export default function Manuscripts({
                     <Tooltip title={a.title} mouseEnterDelay={0.6} placement="topLeft">
                       <div className="manuscript__title">{a.title}</div>
                     </Tooltip>
-                    <div className="manuscript__path">
-                      {a.fileName}
+                    <div
+                      className="manuscript__path"
+                      title={a.manual ? a.fileName : a.relativePath || a.fileName}
+                    >
+                      {a.manual ? a.fileName : a.relativePath || a.fileName}
                       {a.description && (
                         <>
                           {'  —  '}

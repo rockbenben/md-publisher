@@ -8,6 +8,7 @@ import type {
   Platform,
   ProjectConfig,
   Settings,
+  SkippedFile,
 } from './types';
 
 async function jsonOrThrow<T>(res: Response): Promise<T> {
@@ -43,20 +44,21 @@ export const api = {
     articles: Article[];
     dir: string;
     projectConfig?: ProjectConfig;
+    skipped?: SkippedFile[];
     error?: string;
   }> {
     const res = await fetch(`/api/articles?dir=${encodeURIComponent(dir)}`);
     return res.json();
   },
 
-  async parsePath(filePath: string): Promise<{ articles?: Article[]; error?: string }> {
+  async parsePath(filePath: string): Promise<{ articles?: Article[]; skipped?: SkippedFile[]; error?: string }> {
     const res = await postJson('/api/articles/parse', { filePath });
     return res.json();
   },
 
   async uploadFiles(
     files: { name: string; content: string }[],
-  ): Promise<{ articles?: Article[]; error?: string }> {
+  ): Promise<{ articles?: Article[]; skipped?: SkippedFile[]; error?: string }> {
     const res = await postJson('/api/articles/upload', { files });
     return res.json();
   },

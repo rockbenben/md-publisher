@@ -12,6 +12,7 @@ export default function Destinations({
   dispatch,
   loginChecking,
   disabled,
+  hasArticles,
   onToggle,
   onOpen,
   onCheckLogin,
@@ -22,10 +23,15 @@ export default function Destinations({
   dispatch: Record<string, DispatchInfo>;
   loginChecking: boolean;
   disabled: boolean;
+  hasArticles: boolean;
   onToggle: (id: string) => void;
   onOpen: (id: string) => void;
   onCheckLogin: () => void;
 }) {
+  const needsLogin = platforms.some(
+    (p) => selected.has(p.id) && loginStatus[p.id]?.loggedIn !== true,
+  );
+
   return (
     <section style={{ marginTop: 26 }}>
       <SectionLabel
@@ -124,6 +130,12 @@ export default function Destinations({
           );
         })}
       </div>
+
+      {hasArticles && needsLogin && !disabled && (
+        <p className="dest-hint">
+          有平台未登录或未检测：点卡片右侧的 ↗ 打开自动化浏览器登录，登录后点「检测登录」。
+        </p>
+      )}
     </section>
   );
 }
