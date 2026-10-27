@@ -1,0 +1,63 @@
+# .github/workflows/ci.yml — PR / 主分支推送的门禁。
+#
+# 不可信代码只在这里跑：contents: read，不碰任何 secrets。
+# Action 一律用大版本标签（house style：不钉 SHA）。
+#
+# 之前这个仓只有 build.yml，而它只在打 tag 时才跑——PR 阶段一行检查都没有，
+# 等于「合并的代码从没被测过，只是发版那天才第一次跑」。这个文件补上那道门。
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Playwright 自带的浏览器下载在这里是纯浪费：这个应用驱动的是**用户自己装好的
+  # Chrome**（src/browser.js 用 connectOverCDP + detectChromePath 找系统上的
+  # Chrome/Edge/Chromium/Brave），下载下来的浏览器只是「系统里一个都没有」时的
+  # 兜底，而 CI 根本走不到那一步。每个平台因此省掉几百 MB 下载。
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # 钉 major 以便复现；audit.mjs 按 nodejs/Release 官方 schedule 检查这条 pin
+      # 有没有漂到 maintenance/EOL。
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+
+      - run: npm ci
+
+      # 单测是纯 Node 的（electron/supervisor.cjs 不 require electron），
+      # 所以这里不需要 Electron 的运行时二进制。
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Install web deps
+        # `npm ci`, not `install`: web/ 有自己的锁文件且全是 caret 范围，
+        # 用 install 可能装上从未提交、从未审阅过的版本。
+        run: npm run web:ci
+
+      - name: Build web (tsc --noEmit + vite)
+        # tsc --noEmit 是这一仓唯一的类型检查入口，顺带把前端真的构建一遍。
+        run: npm run web:build

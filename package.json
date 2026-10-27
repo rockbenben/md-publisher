@@ -29,7 +29,7 @@
   },
   "homepage": "https://github.com/rockbenben/md-publisher",
   "engines": {
-    "node": ">=18.0.0"
+    "node": "^22.13.0 || >=24.0.0"
   },
   "scripts": {
     "start": "node src/index.js",
@@ -51,7 +51,7 @@
   "dependencies": {
     "@inquirer/prompts": "^8.5.2",
     "chalk": "^6.0.1",
-    "electron-updater": "^6.8.9",
+    "electron-updater": "^6.8.11",
     "express": "^5.2.1",
     "js-yaml": "^5.5.0",
     "marked": "^18.0.5",
@@ -59,8 +59,8 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "electron": "^44.9.0",
-    "electron-builder": "^26.15.3",
+    "electron": "^45.1.0",
+    "electron-builder": "^26.18.0",
     "eslint": "^10.13.0",
     "globals": "^17.13.0"
   }

@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 2,
+  "status": "house-style-default",
+  "verifiedOn": "2026-10-28",
+  "framework": "electron",
+  "channel": "stable",
+  "platforms": [
+    "windows-x64",
+    "windows-arm64",
+    "macos-arm64",
+    "macos-x64",
+    "linux-x64",
+    "linux-arm64"
+  ],
+  "packageManager": "npm (npm ci in CI; web/ 有自己的锁文件，用 npm run web:ci)",
+  "node": "CI 钉当前 Active LTS（26）。package.json 的 engines 表达的是**工具链真正需要的下限**（^22.13.0 || >=24.0.0）：Node 20 已于 2026-04-30 EOL，不再声称支持；22.13 是 ESLint 10 对 22 线的下限，同时满足 Vite 8 的 >=22.12.0。engines 不是 CI 的钉版——不另设 .nvmrc，少一处要同步的东西",
+  "distribution": {
+    "primary": "github-releases",
+    "secondary": [
+      "winget (清单归 winget-manifests/apps.json，不在本仓提交)"
+    ],
+    "windows": "nsis (可自更新) + portable (不可自更新，release 说明已标注)",
+    "macos": "dmg (安装) + zip (应用内更新必需载体，缺了 macOS 更新必失败)",
+    "linux": "AppImage (可自更新) + deb + rpm"
+  },
+  "updater": "in-app, mandatory (electron-updater；用户显式同意才下载与安装)",
+  "signing": {
+    "windows": "未签名：仓库还没有 Azure Artifact Signing 凭据。未签名期间在 release 说明里提示 SmartScreen",
+    "macos": "未签名未公证：仓库还没有 Apple Developer ID 凭据。**macOS 的应用内更新需要已签名的应用**，未签名时更新只能查得到、装不上，release 说明已写明",
+    "linux": "无 OS 签名；用 SHA256SUMS + provenance attestation"
+  },
+  "versionSource": "git tag vX.Y.Z；release 工作流的 validate job 断言 tag == package.json version",
+  "release": "validate (tag⇄版本 + 测试) → build (--publish never) → publish (校验清单 + 草稿 + SHA256SUMS + attestation + 人工审批 + make_latest + 匿名核验)",
+  "actionPins": "大版本标签（不钉 SHA）；不用 Dependabot",
+  "immutableReleases": "流水线稳定后再开",
+  "deviations": [
+    {
+      "rule": "windows-unsigned",
+      "reason": "还没有 Azure Artifact Signing 账户；Windows 产物未签名，首启会显示「未知发布者」并可能触发 SmartScreen。release 说明里已提前告知用户如何绕过。",
+      "revisitWhen": "Azure Artifact Signing 账户获批当天（届时在 electron-builder.yml 加 win.azureSignOptions，并在 release 工作流填 AZURE_* secrets）"
+    },
+    {
+      "rule": "macos-not-notarized",
+      "reason": "还没有 Apple Developer ID 证书。macOS 产物未签名未公证，首次打开需右键→打开；且 macOS 的应用内更新要求更新包与已装应用同一签名，未签名时更新会装不上——release 说明里已写明手动更新。",
+      "revisitWhen": "拿到 Developer ID 证书当天（届时在 release 工作流填 MAC_CSC_LINK / APPLE_* secrets）"
+    }
+  ],
+  "notes": "audit.mjs 只读 platforms 与 deviations[]。rule == 'platforms' 缩小平台矩阵；rule == 发现 id（如 windows-unsigned）把该发现标成「已接受」，不计入 P0/P1/P2。缺 reason 或 revisitWhen 的偏离按漂移报告。"
+}

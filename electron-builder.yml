@@ -14,18 +14,38 @@ files:
   - package.json
 extraMetadata:
   main: electron/main.cjs
+
+# electron-updater 的更新清单（latest*.yml）靠这里知道往哪儿发。
+# 显式写出来，不靠 package.json 的 repository 字段自动推断：仓库改名或换 owner
+# 时自动推断会静默指向错的仓库，而清单指错就是「用户查不到更新」。
+publish:
+  provider: github
+  owner: rockbenben
+  repo: md-publisher
+
 win:
   target:
     - nsis
+    # portable 只是便利产物，**不能自更新**（没有安装布局可替换）。
+    # release 说明里要写明这一点。
     - portable
 mac:
   target:
     - dmg
+    # zip 是 macOS 应用内更新的**必需**载体，不是可选的第二个包：
+    # electron-updater 的 MacUpdater 只在清单里找 zip
+    # （out/MacUpdater.js: findFile(files, "zip", ["pkg","dmg"])，
+    # 而那个 ["pkg","dmg"] 是**排除表**——只有 dmg 时会抛
+    # ERR_UPDATER_ZIP_FILE_NOT_FOUND，更新检查 100% 失败）。
+    # v0.4.0 就是只有 dmg，Mac 上点「检查更新」必报错。
+    - zip
   category: public.app-category.productivity
 linux:
   target:
+    # AppImage 是 Linux 上唯一能自更新的格式；deb/rpm 只是安装渠道。
     - AppImage
     - deb
+    - rpm
   category: Utility
 nsis:
   oneClick: false

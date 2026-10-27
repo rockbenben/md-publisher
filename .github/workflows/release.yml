@@ -1,0 +1,395 @@
+# .github/workflows/release.yml — Electron + electron-builder + electron-updater，多平台。
+# desktop-app-standard house style。**这个文件只维护在默认分支**：
+# 打 tag 时跑的是「被 tag 的那个提交里的」这份文件——修了工作流却给旧提交打 tag，
+# 跑的还是旧工作流。
+#
+# 流程：validate（tag ⇄ 版本、测试）→ build（每个 OS 一个 job，同一个 job 里打该 OS
+#       的**全部**架构，--publish never）→ publish（唯一的发布者：校验清单、草稿、
+#       SHA256SUMS、attestation、人工审批、发布 + make_latest、匿名核验）。
+#
+# 为什么不是以前那种「三条腿各自发版」：
+# electron-builder 的 GitHub publisher 默认建的是**草稿**（app-builder-lib/out/
+# publish/gitHubPublisher.js 里 `this.releaseType = "draft"`），三条腿同时往同一个
+# tag 上发布会撞成同一个 tag 出现两条 release，产物被随机拆成两半——repo-radar 的
+# release.yml 头注释记的就是这个坑。
+# 现在 build 全部 `--publish never`，整个流水线里**只有 publish 一个 job 有写权限**，
+# 冲突从根上不存在了，不用再靠 max-parallel 串行去绕。
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要重跑的已有 tag，例如 v1.2.3'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+  # Playwright 自带的浏览器用不上：这个应用驱动的是**用户自己装好的 Chrome**
+  # （src/browser.js 里 connectOverCDP + detectChromePath 找系统上的
+  # Chrome/Edge/Chromium/Brave），下载的浏览器只是「系统里一个都没有」时的兜底，
+  # 而打包根本走不到那一步。每个平台因此省掉几百 MB 下载。
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+
+jobs:
+  validate:
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: '${{ env.TAG }}'
+
+      # **tag 是唯一的版本源。** 以前这条是空的：tag 触发发布，但产物里的版本取自
+      # package.json，两边对不对得上没人管——今天恰好一致只是因为手改时没出错。
+      # 现在对不上就直接失败，不把「版本各说各话」的安装包发出去。
+      - id: version
+        name: tag 是唯一的版本源
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::$TAG is not vX.Y.Z"
+            exit 1
+          fi
+          version="${TAG#v}"
+          pkg=$(node -p "require('./package.json').version")
+          if [ "$pkg" != "$version" ]; then
+            echo "::error::version mismatch: package.json $pkg != tag $version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+
+      - run: npm ci
+
+      # 单测是纯 Node 的（electron/supervisor.cjs 不 require electron），
+      # 所以这里不需要 Electron 的运行时二进制。
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Install web deps
+        # `npm ci`, not `install`: web/ 有自己的锁文件且全是 caret 范围，
+        # 用 install 可能装上从未提交、从未审阅过的版本。
+        run: npm run web:ci
+
+      - name: Build web
+        run: npm run web:build
+
+      # AGENTS.md 的约定：src/public 是**入库的构建产物**，改了 web/ 就得把重建后的
+      # src/public 一起提交。这里当场重建并比对——不一致说明这次发版打出来的界面
+      # 会和仓库里存的不是同一份。
+      - name: src/public 必须和 web/ 的构建结果一致
+        run: |
+          if ! git diff --exit-code -- src/public; then
+            echo "::error::src/public 与 web/ 的构建结果不一致——改了 web/ 就要把重建后的 src/public 一起提交"
+            exit 1
+          fi
+
+  build:
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # **同一个 OS 的所有架构必须放在同一个 job 里。**
+          # 分成两个 job 的话，两个架构会各写一个同名的 latest*.yml 互相覆盖
+          # （house style：分 job 打会各写同名 latest-mac.yml）。
+          - { os: windows-latest, name: win, args: '--win nsis --x64 --arm64' }
+          # mac 的 zip 不是可选的第二个包，是**更新通道本身**：electron-updater 的
+          # MacUpdater 只在清单里找 zip，只有 dmg 时 macOS 上「检查更新」必失败。
+          - { os: macos-latest, name: mac, args: '--mac dmg zip --x64 --arm64' }
+          # AppImage 是 Linux 上唯一能自更新的格式；deb/rpm 只是安装渠道。
+          # linux arm64 是在 x64 runner 上交叉构建的——真要带原生模块时得换成
+          # arm64 runner（本应用打包的是纯 JS 的 Playwright，交叉构建没问题）。
+          - { os: ubuntu-22.04, name: linux, args: '--linux AppImage deb rpm --x64 --arm64' }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: '${{ env.TAG }}'
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+
+      - run: npm ci
+
+      # Electron ≥ 42 起不再在 postinstall 下载运行时了（Electron 42 起由
+      # install-electron 这个 bin 负责）。这里显式装一次，让 node_modules/electron/dist
+      # 存在，打包与后续检查都取同一个版本。
+      - run: npx install-electron
+
+      - name: Install web deps
+        run: npm run web:ci
+
+      - name: Build web
+        run: npm run web:build
+
+      - name: Build
+        # `--publish never`：产物一律不发布，由 publish 这个唯一的 job 上传。
+        run: npx electron-builder ${{ matrix.args }} --publish never
+        env:
+          # 凭据为空时 electron-builder 照常出未签名产物（不会失败）。
+          # 以后拿到凭据只要往仓库 secrets 里加同名变量，不用改工作流。
+          #
+          # macOS：Developer ID + 公证。**未签名时 macOS 的应用内更新装不上**
+          # （Squirrel.Mac 要求更新包与已装应用同一签名），所以这两个变量到位之前，
+          # macOS 的更新只是「查得到、装不上」。
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.MAC_CSC_LINK != '' }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Windows：Azure Artifact Signing。**凭据到位前不要往 electron-builder.yml
+          # 里加 win.azureSignOptions**，否则打包会直接失败。
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            release/*.exe
+            release/*.dmg
+            release/*.zip
+            release/*.AppImage
+            release/*.deb
+            release/*.rpm
+            release/*.blockmap
+            release/latest*.yml
+
+  publish:
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    # protected environment：在这里配 required reviewers 就是人工审批门。
+    # 仓库里还没有这个 environment，第一次跑会自动建一个——记得去设置里补上审核人。
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      VERSION: ${{ needs.validate.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: 'dist-*'
+          merge-multiple: true
+          path: release
+
+      # electron-builder 的 GitHub publisher 上传时会**改名**：GitHub 的资产名只允许
+      # [0-9A-Za-z._-]，所以本地带空格的文件名（"md-publisher Setup 0.4.0.exe"）
+      # 上传后叫 "md-publisher-Setup-0.4.0.exe"，更新清单里的 url 也指向这个名字
+      # （app-builder-lib/out/platformPackager.js 的 computeSafeArtifactNameIfNeeded：
+      #  空格 → 短横线；out/publish/updateInfoBuilder.js 再把清单的 url 换成它）。
+      #
+      # 现在发布由本 job 手动上传（build 全部 --publish never），上游那次改名**不会发生**
+      # ——照原样传上去，清单就会指向一个不存在的资产，应用内更新直接 404。
+      # 这里把上游的改名规则补回来，资产名也就和 v0.4.0 保持一致。
+      #
+      # 下面「清单指向的文件必须存在」就是这道改名的安全网：哪天规则变了，
+      # 发布会**当场失败**，而不是悄悄发一个坏掉的更新源。
+      - name: 还原 electron-builder 的资产改名规则（空格 → 短横线）
+        run: |
+          set -euo pipefail
+          cd release
+          for f in *; do
+            if [ -f "$f" ] && [[ "$f" == *" "* ]]; then
+              mv -- "$f" "${f// /-}"
+            fi
+          done
+
+      - name: 校验每一份更新清单和它指向的文件
+        run: |
+          set -euo pipefail
+          cd release
+          for m in latest.yml latest-mac.yml latest-linux.yml latest-linux-arm64.yml; do
+            if [ ! -f "$m" ]; then
+              echo "::error::缺少更新清单 $m"
+              exit 1
+            fi
+            if ! grep -q "^version: $VERSION$" "$m"; then
+              echo "::error::$m 的版本不是 $VERSION"
+              exit 1
+            fi
+            while read -r u; do
+              if [ ! -f "$u" ]; then
+                echo "::error::$m 指向了不存在的文件 $u"
+                exit 1
+              fi
+            done < <(grep -E '^\s*-?\s*url:' "$m" | awk '{print $NF}')
+          done
+
+      - name: 清单必须指向能自更新的载体
+        run: |
+          set -euo pipefail
+          cd release
+          # macOS 的清单必须指向 zip。electron-updater 的 MacUpdater 只认 zip，
+          # 指向 dmg 会抛 ERR_UPDATER_ZIP_FILE_NOT_FOUND（v0.4.0 就是这么坏的：
+          # 只有 dmg 目标，latest-mac.yml 指向 .dmg，Mac 上更新 100% 失败）。
+          if ! grep -E '^\s*-?\s*url:' latest-mac.yml | grep -qi '\.zip$'; then
+            echo "::error::latest-mac.yml 没有指向 zip，macOS 的应用内更新会失败"
+            exit 1
+          fi
+          # Windows 只认 NSIS 安装包；portable 装不上更新。
+          if ! grep -E '^\s*-?\s*url:' latest.yml | grep -qi 'setup.*\.exe$'; then
+            echo "::error::latest.yml 没有指向 NSIS 安装包"
+            exit 1
+          fi
+          # Linux 靠 AppImage 自更新。
+          if ! grep -E '^\s*-?\s*url:' latest-linux.yml | grep -qi '\.appimage$'; then
+            echo "::error::latest-linux.yml 没有指向 AppImage"
+            exit 1
+          fi
+
+      - name: SHA256SUMS（LF，在 Linux 上生成）
+        # 必须在 Linux 上生成：PowerShell 的 Set-Content 会写 CRLF，
+        # sha256sum -c 会全部失败。
+        # 用 find -print0 而不是 `sha256sum -- *`：通配符会把 SHA256SUMS 自己
+        # 也算进去（重跑时它已经存在），得到一个自指的错误清单。
+        run: |
+          set -euo pipefail
+          cd release
+          rm -f SHA256SUMS
+          find . -maxdepth 1 -type f ! -name 'SHA256SUMS' -print0 | sort -z | xargs -0 -r sha256sum > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: actions/attest@v4
+        with:
+          subject-checksums: release/SHA256SUMS
+
+      - name: 写 release 说明
+        run: |
+          cat > notes.md <<'EOF'
+          ## 安装
+
+          - **Windows**：推荐 `Setup-<版本>.exe`（NSIS 安装包，**支持应用内更新**）。
+            `md-publisher-<版本>.exe` 是 portable 版，免安装，但**不能自动更新**。
+          - **macOS**：拖入「应用程序」即可。
+          - **Linux**：AppImage 可直接运行；deb/rpm 用于系统安装。
+
+          ## 已知提示
+
+          - **Windows 产物尚未代码签名**：首次运行会显示「未知发布者」，Windows
+            SmartScreen 可能拦截。请点「更多信息 → 仍要运行」。
+          - **macOS 产物尚未签名公证**：首次打开需要右键 → 打开，或到
+            「系统设置 → 隐私与安全性」里放行。
+          - **macOS 的应用内更新需要已签名的应用**。当前未签名，macOS 上更新会
+            提示有新版本、但安装步骤会失败，请手动下载替换。
+          EOF
+
+      - name: 建草稿并上传全部产物
+        run: |
+          set -euo pipefail
+          # 已经发布过的 tag 不许再改产物——修只能 forward-fix（发新版本）。
+          if gh release view "$TAG" -R "$REPO" --json isDraft --jq .isDraft 2>/dev/null | grep -q false; then
+            echo "::error::$TAG 已经发布过了；升版本号再发"
+            exit 1
+          fi
+          pre=()
+          if [[ "$TAG" == *-* ]]; then pre=(--prerelease); fi
+          # `gh release view` 对已认证调用者能解析草稿；草稿只能用 CLI 找，
+          # `releases/tags/<tag>` 那个 API 端点不返回草稿。
+          if ! gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
+            gh release create "$TAG" -R "$REPO" --draft --verify-tag \
+              --title "$TAG" --notes-file notes.md "${pre[@]}"
+          fi
+          gh release upload "$TAG" -R "$REPO" release/* --clobber
+
+      - name: 发布，并把 latest 指到它
+        run: |
+          set -euo pipefail
+          # ⚠️ **不能只发草稿了事**：草稿转成已发布时，GitHub **不会**重算
+          # `releases/latest` 指向谁——release 已经是 draft=false、prerelease=false，
+          # `releases/latest` 却仍返回旧版本，端点 `releases/latest/download/latest.json`
+          # 于是 **404**（旧 release 里没有 latest.json）。所以这里一次 PATCH 同时给
+          # `draft=false` 与 `make_latest=true`，不靠 GitHub 自己挪。
+          #
+          # 判据是**看 API 指到谁**，不是看 release 的字段：字段全对而指针没挪，
+          # 端点照样 404。CDN 那层重定向还会再滞后几分钟，属正常——这里判 API，不判 CDN。
+          #
+          # ⚠️ **不能用 `releases/tags/<tag>` 找这条 release**：那个端点**不返回草稿**。
+          # 草稿只能从 release 列表里捞——列表按创建时间倒序，新建的在第一页。
+          id=$(gh api "repos/$REPO/releases?per_page=100" \
+                 --jq "first(.[] | select(.tag_name == \"$TAG\") | .id)")
+          if [ -z "$id" ]; then
+            echo "::error::没找到 tag $TAG 对应的 release"
+            exit 1
+          fi
+          latest=true
+          if [[ "$TAG" == *-* ]]; then latest=false; fi
+          gh api --method PATCH "repos/$REPO/releases/$id" \
+            -F draft=false -f make_latest=$latest > /dev/null
+
+      - name: 发布后匿名核验（像真实用户那样）
+        if: ${{ !contains(env.TAG, '-') }}
+        run: |
+          set -euo pipefail
+          if [ "$(gh api "repos/$REPO/releases/latest" --jq .tag_name)" != "$TAG" ]; then
+            echo "::error::releases/latest 不是 $TAG"
+            exit 1
+          fi
+          for m in latest.yml latest-mac.yml latest-linux.yml latest-linux-arm64.yml; do
+            ok=
+            for _ in $(seq 1 10); do
+              if curl -fsSL "https://github.com/$REPO/releases/latest/download/$m" | grep -q "^version: $VERSION$"; then
+                ok=1
+                break
+              fi
+              sleep 60
+            done
+            if [ -z "$ok" ]; then
+              echo "::error::$m 公开下载十分钟后仍是旧的"
+              exit 1
+            fi
+          done
+
+  # --- winget -------------------------------------------------------------------------------
+  # **清单不在这个仓里提交。** winget 的清单归 winget-manifests：那边的 apps.json
+  # 是唯一源，它自己巡检各发布仓的 release，发现新版本就重生成 manifest、往
+  # winget-pkgs 开 PR。本仓只管把 release 发出去；把新应用加进 apps.json 即可。
+  # 不要在这里再开第二条提交路径——两条路写同一个包，第二个 PR 会被当重复拒掉，
+  # 看起来就像「winget 坏了」。
+  #
+  # 不在 winget-manifests 那条流水线里的发布者，才用下面注释掉的 winget-releaser 写法
+  # （需要 classic PAT：public_repo、workflow；存成 WINGET_TOKEN；首个版本手工提交）。
+  # winget:                                # optional; first version must be submitted manually
+  #   needs: publish
+  #   if: ${{ !contains(inputs.tag || github.ref_name, '-') && vars.WINGET_ID != '' }}
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Token preflight
+  #       env: { WINGET_TOKEN: '${{ secrets.WINGET_TOKEN }}' }
+  #       run: '[ -n "$WINGET_TOKEN" ] || { echo "::error::WINGET_TOKEN (classic PAT: public_repo, workflow) missing"; exit 1; }'
+  #     - uses: vedantmgoyal9/winget-releaser@v2
+  #       with:
+  #         identifier: ${{ vars.WINGET_ID }}
+  #         release-tag: ${{ env.TAG }}
+  #         installers-regex: '\.exe$'
+  #         max-versions-to-keep: 5
+  #         token: ${{ secrets.WINGET_TOKEN }}
