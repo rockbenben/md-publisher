@@ -7,3 +7,4 @@ settings.json
 .shots/
 *.tsbuildinfo
 release/
+.qoder*
