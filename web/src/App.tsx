@@ -26,6 +26,17 @@ import Settings from './components/Settings';
 
 const MAX_LOG_LINES = 500;
 const pad = (n: number) => String(n).padStart(2, '0');
+
+/**
+ * The outcome of a manuscript scan.
+ *
+ * 'superseded' is deliberately NOT a failure: another refresh started while
+ * this one was in flight, so this one steps aside. Callers that report "the
+ * scan failed" must not treat that as a failure — the work they did (e.g.
+ * saving the settings) succeeded regardless.
+ */
+type ScanOutcome = 'ok' | 'failed' | 'superseded';
+
 const clock = (sec: boolean) => {
   const d = new Date();
   const base = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -130,7 +141,10 @@ export default function App() {
 
   // ---- Articles ----
   const refreshArticles = useCallback(
-    async (dir: string, opts: { quiet?: boolean; preserveSelection?: boolean } = {}) => {
+    async (
+      dir: string,
+      opts: { quiet?: boolean; preserveSelection?: boolean } = {},
+    ): Promise<ScanOutcome> => {
       const seq = ++refreshSeq.current;
       setProjectConfig(null);
       let scanned: Article[] = [];
@@ -140,7 +154,7 @@ export default function App() {
       if (dir) {
         try {
           const data = await api.getArticles(dir);
-          if (seq !== refreshSeq.current) return false; // a newer refresh superseded us
+          if (seq !== refreshSeq.current) return 'superseded'; // a newer refresh superseded us
           skipped = data.skipped ?? [];
           if (data.error) {
             scanFailure = data.error;
@@ -150,7 +164,7 @@ export default function App() {
             cfg = data.projectConfig ?? null;
           }
         } catch {
-          if (seq !== refreshSeq.current) return false;
+          if (seq !== refreshSeq.current) return 'superseded';
           scanFailure = '加载稿件失败';
           message.error(scanFailure);
         }
@@ -191,7 +205,7 @@ export default function App() {
             : `已从默认目录加载 ${scanned.length} 篇稿件`,
         );
       }
-      return !scanFailure;
+      return scanFailure ? 'failed' : 'ok';
     },
     [message],
   );
@@ -471,8 +485,11 @@ export default function App() {
       setSettings(saved);
       // Scan before claiming success: an unreadable path would otherwise pair
       // a green 「设置已保存」 with the red 「目录不存在」 toast.
-      const scanned = await refreshArticles(dir);
-      if (scanned) message.success('设置已保存');
+      // A *superseded* scan (another refresh started meanwhile) is not a
+      // failure — the settings were saved either way, and the newer refresh
+      // reports its own outcome — so only 'failed' withholds the confirmation.
+      const outcome = await refreshArticles(dir);
+      if (outcome !== 'failed') message.success('设置已保存');
       setTab('publish');
     } catch (err) {
       message.error('设置保存失败: ' + (err as Error).message);
