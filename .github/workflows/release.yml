@@ -333,10 +333,12 @@ jobs:
           cat > notes.md <<'EOF'
           ## 安装
 
-          - **Windows**：推荐 `Setup-<版本>.exe`（NSIS 安装包，**支持应用内更新**）。
+          - **Windows**：用 `md-publisher-Setup-<版本>.exe`（NSIS 安装包，**支持应用内更新**）。
+            这一个安装包同时含 x64 与 arm64 两个架构，安装时自动选对应架构。
             `md-publisher-<版本>.exe` 是 portable 版，免安装，但**不能自动更新**。
-          - **macOS**：拖入「应用程序」即可。
-          - **Linux**：AppImage 可直接运行；deb/rpm 用于系统安装。
+          - **macOS**：拖入「应用程序」即可（`.dmg`）；**要用应用内更新就下载同版本的
+            `.zip`**（`md-publisher-<版本>-mac.zip` / `-arm64-mac.zip`）。
+          - **Linux**：AppImage 可直接运行（**只有它能自动更新**）；deb/rpm 用于系统安装。
 
           ## 已知提示
 
