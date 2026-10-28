@@ -102,10 +102,16 @@ jobs:
       # AGENTS.md 的约定：src/public 是**入库的构建产物**，改了 web/ 就得把重建后的
       # src/public 一起提交。这里当场重建并比对——不一致说明这次发版打出来的界面
       # 会和仓库里存的不是同一份。
+      #
+      # 用 `git status --porcelain` 而不是 `git diff --exit-code`：**git diff 只比较
+      # 已跟踪的文件**，前端新增的资源（新的图标之类）它根本看不见，守卫会放行，
+      # 于是仓库里入库的那份构建产物就少了东西。status 连未跟踪的一起报。
       - name: src/public 必须和 web/ 的构建结果一致
         run: |
-          if ! git diff --exit-code -- src/public; then
+          set -euo pipefail
+          if [ -n "$(git status --porcelain -- src/public)" ]; then
             echo "::error::src/public 与 web/ 的构建结果不一致——改了 web/ 就要把重建后的 src/public 一起提交"
+            git status --porcelain -- src/public
             exit 1
           fi
 
